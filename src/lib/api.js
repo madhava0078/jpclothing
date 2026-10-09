@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://jpclothing-api.onrender.com/products';
 
 export function getAuthToken() {
   return localStorage.getItem('jp_auth_token') || '';
