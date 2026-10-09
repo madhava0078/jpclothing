@@ -1,0 +1,264 @@
+/* JP Clothing Luxury Burgundy & Gold Design System */
+:root {
+  --bg: #1c0308;
+  --card: #2c070e;
+  --card-hover: #3a0b14;
+  --ink: #fff6eb;
+  --ink-secondary: #e2b9bd;
+  --mute: #b8868c;
+  --brand: #d4af37;
+  /* Metallic Gold */
+  --brand-light: rgba(212, 175, 55, 0.16);
+  --brand-dark: #f5d061;
+  --brand-ink: #180205;
+  --accent: #f43f5e;
+  --accent-light: #4c0519;
+  --line: #4a0d17;
+  --tag: #f5d061;
+  --tag-ink: #2b1700;
+  --gold-glow: 0 4px 20px rgba(212, 175, 55, 0.35);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.8);
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 24px;
+  --radius-full: 9999px;
+  --glass: rgba(44, 7, 14, 0.88);
+  --glass-border: rgba(212, 175, 55, 0.3);
+}
+
+[data-theme="light"] {
+  --bg: #26040a;
+  --card: #360810;
+  --card-hover: #470d18;
+  --ink: #ffffff;
+  --ink-secondary: #ebd3d6;
+  --mute: #c4999f;
+  --brand: #f5d061;
+  --brand-light: rgba(245, 208, 97, 0.2);
+  --brand-dark: #ffe599;
+  --brand-ink: #1c0308;
+  --line: #52111d;
+  --glass: rgba(54, 8, 16, 0.9);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  min-height: 100vh;
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: 'Nunito', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  scroll-behavior: smooth;
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-heading {
+  font-family: 'Cinzel', 'Fredoka', serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand-text {
+  background: linear-gradient(135deg, #bf953f 0%, #fcf6ba 25%, #b38728 50%, #fbf5b7 75%, #aa771c 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Product Catalog Grid - Compact & Responsive */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes floatSoft {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-in {
+  animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-float {
+  animation: floatSoft 3s ease-in-out infinite;
+}
+
+/* Custom UI Utility Components */
+.glass-panel {
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #d4af37 0%, #f5d061 50%, #c59b27 100%);
+  color: #180205;
+  border: none;
+  border-radius: var(--radius-full);
+  padding: 10px 22px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.25s ease;
+  box-shadow: var(--gold-glow);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 6px 24px rgba(212, 175, 55, 0.5);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--brand);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-md);
+  padding: 8px 16px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 0.92rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: var(--brand);
+  color: var(--brand-ink);
+  transform: translateY(-1px);
+}
+
+.btn-icon {
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-icon:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  transform: scale(1.05);
+}
+
+/* Chip filter buttons */
+.chip {
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: var(--radius-full);
+  padding: 8px 18px;
+  font: 700 0.9rem 'Nunito', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  transform: translateY(-1px);
+}
+
+.chip[aria-pressed="true"] {
+  background: linear-gradient(135deg, #d4af37 0%, #f5d061 100%);
+  color: #180205;
+  border-color: var(--brand);
+  box-shadow: 0 4px 14px rgba(212, 175, 55, 0.3);
+}
+
+/* Focus outline */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}

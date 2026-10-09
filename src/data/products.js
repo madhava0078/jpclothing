@@ -1,0 +1,196 @@
+export const PRODUCTS = [
+    {
+        id: 1,
+        n: "Cotton Frock",
+        c: "Girls",
+        a: "2–8 yrs",
+        p: 699,
+        o: 899,
+        k: "dress",
+        bg: "#fbd5df",
+        fg: "#c2410c",
+        t: "Sale",
+        image: "/images/cotton_frock.png",
+        rating: 4.8,
+        reviewsCount: 124,
+        fabric: "100% Breathable Organic Cotton",
+        sizes: ["2Y", "3Y", "4Y", "5-6Y", "7-8Y"],
+        colors: [
+            { name: "Blush Pink", hex: "#fbd5df" },
+            { name: "Peach Coral", hex: "#ffedd5" },
+            { name: "Mint Sparkle", hex: "#d1fae5" }
+        ],
+        description: "Ultra-soft premium organic cotton frock with charming floral print. Breathable, hypoallergenic, and gentle on sensitive skin. Ideal for playdates and weekend outings.",
+        washCare: "Machine wash cold with like colors. Gentle cycle. Tumble dry low."
+    },
+    {
+        id: 2,
+        n: "Soft Pajama Set",
+        c: "Boys",
+        a: "1–7 yrs",
+        p: 549,
+        o: 699,
+        k: "set",
+        bg: "#cfe8ff",
+        fg: "#1d4ed8",
+        t: "Bestseller",
+        image: "/images/pajama_set.png",
+        rating: 4.9,
+        reviewsCount: 98,
+        fabric: "Super-soft Combed Cotton",
+        sizes: ["1-2Y", "2-3Y", "4-5Y", "6-7Y"],
+        colors: [
+            { name: "Sky Blue", hex: "#cfe8ff" },
+            { name: "Navy Stars", hex: "#1e3a8a" },
+            { name: "Cloud Grey", hex: "#e2e8f0" }
+        ],
+        description: "Cozy 2-piece lounge & nightwear set designed for unrestricted playful movement and blissful bedtime comfort. Features snug elasticated waistband.",
+        washCare: "Hand wash or gentle machine wash inside out."
+    },
+    {
+        id: 3,
+        n: "Everyday Romper",
+        c: "Infants",
+        a: "0–2 yrs",
+        p: 399,
+        o: 499,
+        k: "romper",
+        bg: "#fff1b8",
+        fg: "#a16207",
+        t: "New",
+        image: "/images/baby_romper.png",
+        rating: 4.7,
+        reviewsCount: 45,
+        fabric: "100% Muslin Cotton",
+        sizes: ["0-3M", "3-6M", "6-12M", "12-18M", "18-24M"],
+        colors: [
+            { name: "Sunshine Yellow", hex: "#fff1b8" },
+            { name: "Pastel Sage", hex: "#dcfce7" },
+            { name: "Creamy Ivory", hex: "#fef3c7" }
+        ],
+        description: "Easy-snap baby jumpsuit romper with extra stretch for diaper comfort. Crafted from chemical-free organic cotton fabric.",
+        washCare: "Wash before first use. Machine wash gentle."
+    },
+    {
+        id: 4,
+        n: "Festive Kurta Set",
+        c: "Boys",
+        a: "2–10 yrs",
+        p: 1199,
+        o: 1499,
+        k: "set",
+        bg: "#d9f5df",
+        fg: "#15803d",
+        t: "Sale",
+        image: "/images/kurta_set.png",
+        rating: 4.9,
+        reviewsCount: 210,
+        fabric: "Silk Blend with Cotton Lining",
+        sizes: ["2-3Y", "4-5Y", "6-7Y", "8-9Y", "10Y"],
+        colors: [
+            { name: "Royal Emerald", hex: "#d9f5df" },
+            { name: "Festive Yellow", hex: "#fef08a" },
+            { name: "Maroon Gold", hex: "#fecdd3" }
+        ],
+        description: "Traditional Indian festive kurta pyjama set with subtle golden embroidery details. Soft interior cotton lining prevents itching.",
+        washCare: "Dry clean recommended or hand wash cold separately."
+    },
+    {
+        id: 5,
+        n: "Printed Tee",
+        c: "Boys",
+        a: "2–10 yrs",
+        p: 349,
+        o: 449,
+        k: "tee",
+        bg: "#e5dcff",
+        fg: "#6d28d9",
+        t: "Popular",
+        image: "/images/printed_tee.png",
+        rating: 4.6,
+        reviewsCount: 88,
+        fabric: "100% Bio-Washed Cotton",
+        sizes: ["2-3Y", "4-5Y", "6-7Y", "8-9Y", "10Y"],
+        colors: [
+            { name: "Lavender Pop", hex: "#e5dcff" },
+            { name: "Ocean Teal", hex: "#ccfbf1" },
+            { name: "Sunset Orange", hex: "#ffedd5" }
+        ],
+        description: "Vibrant graphic print casual t-shirt for daily activities. Pre-shrunk bio-washed fabric ensures color stays bright after multiple washes.",
+        washCare: "Do not iron directly on print. Machine wash cold."
+    },
+    {
+        id: 6,
+        n: "Lehenga Choli",
+        c: "Girls",
+        a: "3–10 yrs",
+        p: 1499,
+        o: 1899,
+        k: "dress",
+        bg: "#ffd9c7",
+        fg: "#be123c",
+        t: "New",
+        image: "/images/lehenga_choli.png",
+        rating: 5.0,
+        reviewsCount: 64,
+        fabric: "Soft Brocade Satin & Cotton Dupatta",
+        sizes: ["3-4Y", "5-6Y", "7-8Y", "9-10Y"],
+        colors: [
+            { name: "Rani Pink", hex: "#ffd9c7" },
+            { name: "Bright Yellow", hex: "#fef08a" },
+            { name: "Peacock Blue", hex: "#bae6fd" }
+        ],
+        description: "Stunning kids ethnic lehenga set crafted for weddings and festive occasions. Lightweight flare skirt with comfortable elastic waistband.",
+        washCare: "Dry clean only."
+    },
+    {
+        id: 7,
+        n: "Muslin Swaddle",
+        c: "Infants",
+        a: "0–6 mo",
+        p: 299,
+        o: 399,
+        k: "romper",
+        bg: "#c9efe9",
+        fg: "#0f766e",
+        t: "Essential",
+        image: "/images/baby_romper.png",
+        rating: 4.9,
+        reviewsCount: 156,
+        fabric: "100% Premium Muslin Cotton",
+        sizes: ["Free Size (110cm x 110cm)"],
+        colors: [
+            { name: "Aqua Mint", hex: "#c9efe9" },
+            { name: "Powder Pink", hex: "#fbcfe8" },
+            { name: "Soft Cream", hex: "#fef3c7" }
+        ],
+        description: "Generously sized, ultra-breathable muslin swaddle wrap. Multipurpose use as stroller blanket, nursing cover, or crib sheet.",
+        washCare: "Becomes softer with every wash. Machine wash mild."
+    },
+    {
+        id: 8,
+        n: "Denim Dungaree",
+        c: "Girls",
+        a: "2–8 yrs",
+        p: 849,
+        o: 999,
+        k: "romper",
+        bg: "#d4e3f7",
+        fg: "#1e40af",
+        t: "Trending",
+        image: "/images/cotton_frock.png",
+        rating: 4.7,
+        reviewsCount: 72,
+        fabric: "Soft Stretch Denim & Cotton Tee Inner",
+        sizes: ["2-3Y", "4-5Y", "6-7Y", "8Y"],
+        colors: [
+            { name: "Classic Indigo", hex: "#d4e3f7" },
+            { name: "Vintage Wash", hex: "#93c5fd" }
+        ],
+        description: "Adorable denim dungaree set paired with a soft striped inner tee. Adjustable shoulder straps for growing children.",
+        washCare: "Wash inside out. Machine wash cold."
+    }
+];
+
+export const CATEGORIES = ["All", "Girls", "Boys", "Infants"];
+export const AGE_RANGES = ["All Ages", "0–6 mo", "0–2 yrs", "1–7 yrs", "2–8 yrs", "2–10 yrs", "3–10 yrs"];
