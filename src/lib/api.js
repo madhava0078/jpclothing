@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env.VITE_API_URL || 'https://jpclothing-api.onrender.com').replace(/\/+$/, '');export function getAuthToken() {
+const API_BASE = ((import.meta.env.VITE_API_URL || 'https://jpclothing-api.onrender.com') + '/api').replace(/\/+$/, '');export function getAuthToken() {
   return localStorage.getItem('jp_auth_token') || '';
 }
 
