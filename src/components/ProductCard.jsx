@@ -15,7 +15,83 @@ export default function ProductCard({
     isWishlisted,
     onToggleWishlist
 }) {
-    const discount = product.o ? Math.round(((product.o - product.p) / product.o) * 100) : 0;
+    if (!product) {
+        return null;
+    }
+
+    // =====================================================
+    // PRODUCT PRICE AND DISCOUNT
+    // =====================================================
+
+    const price = Number(product.p) || 0;
+    const originalPrice = Number(product.o) || 0;
+
+    const discount =
+        originalPrice > price && originalPrice > 0
+            ? Math.round(
+                  ((originalPrice - price) / originalPrice) * 100
+              )
+            : 0;
+
+    // =====================================================
+    // STOCK
+    // =====================================================
+
+    const rawStock = product.stock ?? product.quantity;
+
+    const stockValue =
+        rawStock !== undefined &&
+        rawStock !== null &&
+        rawStock !== ''
+            ? Number(rawStock)
+            : null;
+
+    const stockIsValid =
+        stockValue !== null &&
+        Number.isFinite(stockValue) &&
+        stockValue >= 0;
+
+    const hasStock =
+        stockIsValid &&
+        stockValue > 0;
+
+    const stockLabel = !stockIsValid
+        ? 'Stock unavailable'
+        : hasStock
+            ? `${stockValue} in stock`
+            : 'Out of stock';
+
+    // =====================================================
+    // SAFE CALLBACKS
+    // =====================================================
+
+    const handleQuickView = () => {
+        if (typeof onQuickView === 'function') {
+            onQuickView(product);
+        }
+    };
+
+    const handleAddToCart = () => {
+        if (!hasStock) {
+            return;
+        }
+
+        if (typeof onAddToCart === 'function') {
+            onAddToCart(product);
+        }
+    };
+
+    const handleWishlist = (event) => {
+        event.stopPropagation();
+
+        if (typeof onToggleWishlist === 'function') {
+            onToggleWishlist(product);
+        }
+    };
+
+    // =====================================================
+    // RENDER
+    // =====================================================
 
     return (
         <article
@@ -28,21 +104,35 @@ export default function ProductCard({
                 display: 'flex',
                 flexDirection: 'column',
                 position: 'relative',
-                transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                transition:
+                    'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
                 boxShadow: 'var(--shadow-sm)'
             }}
-            onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-4px)';
-                e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-                e.currentTarget.style.borderColor = 'var(--brand)';
+            onMouseEnter={(event) => {
+                event.currentTarget.style.transform =
+                    'translateY(-4px)';
+
+                event.currentTarget.style.boxShadow =
+                    'var(--shadow-md)';
+
+                event.currentTarget.style.borderColor =
+                    'var(--brand)';
             }}
-            onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
-                e.currentTarget.style.borderColor = 'var(--line)';
+            onMouseLeave={(event) => {
+                event.currentTarget.style.transform =
+                    'translateY(0)';
+
+                event.currentTarget.style.boxShadow =
+                    'var(--shadow-sm)';
+
+                event.currentTarget.style.borderColor =
+                    'var(--line)';
             }}
         >
-            {/* Compact Image Container */}
+            {/* =================================================
+                PRODUCT IMAGE
+            ================================================= */}
+
             <div
                 className="img"
                 style={{
@@ -55,87 +145,159 @@ export default function ProductCard({
                     overflow: 'hidden',
                     cursor: 'pointer'
                 }}
-                onClick={() => onQuickView(product)}
+                onClick={handleQuickView}
             >
-                {/* Render High Quality Image if exists, else fallback SVG */}
+                {/* Product image */}
+
                 {product.image ? (
                     <img
                         src={product.image}
-                        alt={product.n}
+                        alt={product.n || 'Product'}
+                        loading="lazy"
                         style={{
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover',
                             transition: 'transform 0.4s ease'
                         }}
-                        onError={(e) => {
-                            e.target.style.display = 'none';
-                            if (e.target.nextSibling) e.target.nextSibling.style.display = 'block';
+                        onError={(event) => {
+                            event.currentTarget.style.display =
+                                'none';
+
+                            const fallback =
+                                event.currentTarget.parentElement
+                                    ?.querySelector(
+                                        '.product-image-fallback'
+                                    );
+
+                            if (fallback) {
+                                fallback.style.display = 'block';
+                            }
                         }}
                     />
                 ) : null}
 
-                <div style={{ display: product.image ? 'none' : 'block', width: '50%', height: '50%' }}>
+                {/* Fallback SVG */}
+
+                <div
+                    className="product-image-fallback"
+                    style={{
+                        display: product.image ? 'none' : 'block',
+                        width: '50%',
+                        height: '50%'
+                    }}
+                >
                     <svg
                         viewBox="0 0 64 64"
                         fill={product.fg || 'var(--brand)'}
                         aria-hidden="true"
-                        style={{ width: '100%', height: '100%' }}
-                        dangerouslySetInnerHTML={{ __html: SVG_ICONS[product.k] || SVG_ICONS.dress }}
+                        style={{
+                            width: '100%',
+                            height: '100%'
+                        }}
+                        dangerouslySetInnerHTML={{
+                            __html:
+                                SVG_ICONS[product.k] ||
+                                SVG_ICONS.dress
+                        }}
                     />
                 </div>
 
-                {/* Tag (Sale/New/Bestseller) */}
+                {/* =================================================
+                    PRODUCT TAG
+                ================================================= */}
+
                 {product.t && (
-                    <span className="tag" style={{
-                        position: 'absolute',
-                        top: '10px',
-                        left: '10px',
-                        background: product.t === 'Sale' ? 'var(--accent)' : 'var(--tag)',
-                        color: product.t === 'Sale' ? '#fff' : 'var(--tag-ink)',
-                        fontWeight: 800,
-                        fontSize: '0.72rem',
-                        padding: '3px 9px',
-                        borderRadius: '999px',
-                        boxShadow: '0 2px 6px rgba(0,0,0,0.2)'
-                    }}>
+                    <span
+                        className="tag"
+                        style={{
+                            position: 'absolute',
+                            top: '10px',
+                            left: '10px',
+                            background:
+                                product.t === 'Sale'
+                                    ? 'var(--accent)'
+                                    : 'var(--tag)',
+                            color:
+                                product.t === 'Sale'
+                                    ? '#fff'
+                                    : 'var(--tag-ink)',
+                            fontWeight: 800,
+                            fontSize: '0.72rem',
+                            padding: '3px 9px',
+                            borderRadius: '999px',
+                            boxShadow:
+                                '0 2px 6px rgba(0,0,0,0.2)'
+                        }}
+                    >
                         {product.t}
                     </span>
                 )}
 
-                {/* Available stock */}
-                {Number.isFinite(Number(product.stock ?? product.quantity)) && (product.stock != null || product.quantity != null) && (
-                    <span style={{position:'absolute',bottom:8,right:8,background:'rgba(24,2,5,.9)',color:Number(product.stock ?? product.quantity) > 0 ? '#86efac' : '#fca5a5',padding:'4px 8px',borderRadius:7,fontSize:'.72rem',fontWeight:800}}>
-                        {(product.stock ?? product.quantity) > 0 ? `${product.stock ?? product.quantity} in stock` : 'Out of stock'}
-                    </span>
-                )}
+                {/* =================================================
+                    STOCK BADGE
+                ================================================= */}
 
-                {/* Discount Badge */}
-                {discount > 0 && (
-                    <span style={{
+                <span
+                    className="product-stock-badge"
+                    style={{
                         position: 'absolute',
                         bottom: '8px',
-                        left: '8px',
-                        background: 'rgba(24, 2, 5, 0.85)',
-                        color: 'var(--brand)',
-                        border: '1px solid var(--brand)',
+                        right: '8px',
+                        background: 'rgba(24,2,5,.92)',
+                        color: !stockIsValid
+                            ? '#fcd34d'
+                            : hasStock
+                                ? '#86efac'
+                                : '#fca5a5',
+                        padding: '5px 9px',
+                        borderRadius: '7px',
+                        fontSize: '0.72rem',
                         fontWeight: 800,
-                        fontSize: '0.7rem',
-                        padding: '2px 7px',
-                        borderRadius: '6px',
-                        backdropFilter: 'blur(4px)'
-                    }}>
+                        zIndex: 2
+                    }}
+                >
+                    {stockLabel}
+                </span>
+
+                {/* =================================================
+                    DISCOUNT BADGE
+                ================================================= */}
+
+                {discount > 0 && (
+                    <span
+                        style={{
+                            position: 'absolute',
+                            bottom: '8px',
+                            left: '8px',
+                            background: 'rgba(24, 2, 5, 0.85)',
+                            color: 'var(--brand)',
+                            border: '1px solid var(--brand)',
+                            fontWeight: 800,
+                            fontSize: '0.7rem',
+                            padding: '3px 7px',
+                            borderRadius: '6px',
+                            backdropFilter: 'blur(4px)',
+                            zIndex: 2
+                        }}
+                    >
                         {discount}% OFF
                     </span>
                 )}
 
-                {/* Wishlist Heart Button */}
+                {/* =================================================
+                    WISHLIST BUTTON
+                ================================================= */}
+
                 <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleWishlist(product);
-                    }}
-                    aria-label="Wishlist product"
+                    type="button"
+                    onClick={handleWishlist}
+                    aria-label={
+                        isWishlisted
+                            ? 'Remove from wishlist'
+                            : 'Add to wishlist'
+                    }
+                    aria-pressed={Boolean(isWishlisted)}
                     style={{
                         position: 'absolute',
                         top: '10px',
@@ -143,112 +305,241 @@ export default function ProductCard({
                         background: 'var(--card)',
                         border: '1px solid var(--line)',
                         borderRadius: '50%',
-                        width: '32px',
-                        height: '32px',
+                        width: '34px',
+                        height: '34px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         cursor: 'pointer',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                        transition: 'transform 0.2s ease'
+                        zIndex: 3
                     }}
                 >
                     <Heart
                         size={16}
-                        color={isWishlisted ? "var(--brand)" : "var(--mute)"}
-                        fill={isWishlisted ? "var(--brand)" : "none"}
+                        color={
+                            isWishlisted
+                                ? 'var(--brand)'
+                                : 'var(--mute)'
+                        }
+                        fill={
+                            isWishlisted
+                                ? 'var(--brand)'
+                                : 'none'
+                        }
                     />
                 </button>
 
-                {/* Quick view button overlay */}
-                <div style={{
-                    position: 'absolute',
-                    inset: 0,
-                    background: 'rgba(0,0,0,0.3)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    opacity: 0,
-                    transition: 'opacity 0.2s ease'
-                }}
+                {/* =================================================
+                    QUICK VIEW OVERLAY
+                ================================================= */}
+
+                <div
                     className="quick-overlay"
-                >
-                    <span style={{
-                        background: 'var(--brand)',
-                        color: 'var(--brand-ink)',
-                        padding: '6px 14px',
-                        borderRadius: '999px',
-                        fontSize: '0.8rem',
-                        fontWeight: 800,
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.3)',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '6px',
-                        boxShadow: 'var(--gold-glow)'
-                    }}>
-                        <Eye size={14} /> Quick View
+                        justifyContent: 'center',
+                        opacity: 0,
+                        transition: 'opacity 0.2s ease',
+                        pointerEvents: 'none'
+                    }}
+                >
+                    <span
+                        style={{
+                            background: 'var(--brand)',
+                            color: 'var(--brand-ink)',
+                            padding: '7px 14px',
+                            borderRadius: '999px',
+                            fontSize: '0.8rem',
+                            fontWeight: 800,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: 'var(--gold-glow)'
+                        }}
+                    >
+                        <Eye size={14} />
+                        Quick View
                     </span>
                 </div>
             </div>
 
-            {/* Info Section */}
-            <div className="info" style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            {/* =================================================
+                PRODUCT INFORMATION
+            ================================================= */}
+
+            <div
+                className="info"
+                style={{
+                    padding: '12px 14px 14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '5px',
+                    flex: 1
+                }}
+            >
+                {/* Product name and rating */}
+
+                <div
+                    style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        gap: '8px'
+                    }}
+                >
                     <h3
-                        onClick={() => onQuickView(product)}
+                        onClick={handleQuickView}
                         style={{
                             fontSize: '0.98rem',
                             color: 'var(--ink)',
                             fontFamily: 'Cinzel, sans-serif',
                             fontWeight: 700,
                             cursor: 'pointer',
-                            lineHeight: 1.25
+                            lineHeight: 1.35,
+                            margin: 0,
+                            overflowWrap: 'anywhere'
                         }}
                     >
-                        {product.n}
+                        {product.n || 'Unnamed Product'}
                     </h3>
-                    {product.rating && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.76rem', fontWeight: 800, color: 'var(--brand)' }}>
-                            <Star size={12} fill="var(--brand)" color="var(--brand)" />
-                            <span>{product.rating}</span>
-                        </div>
-                    )}
+
+                    {product.rating != null &&
+                        Number(product.rating) > 0 && (
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    fontSize: '0.76rem',
+                                    fontWeight: 800,
+                                    color: 'var(--brand)',
+                                    flexShrink: 0
+                                }}
+                            >
+                                <Star
+                                    size={12}
+                                    fill="var(--brand)"
+                                    color="var(--brand)"
+                                />
+
+                                <span>{product.rating}</span>
+                            </div>
+                        )}
                 </div>
 
-                <span className="age" style={{ color: 'var(--mute)', fontSize: '0.82rem', fontWeight: 600 }}>
-                    {product.a}
-                </span>
+                {/* Age/category description */}
 
-                {/* Price */}
-                <div className="price" style={{ fontWeight: 800, fontSize: '1.05rem', margin: '4px 0 8px', color: 'var(--brand)' }}>
-                    ₹{product.p}
-                    {product.o && (
-                        <s style={{ color: 'var(--mute)', fontWeight: 400, fontSize: '0.85rem', marginLeft: '6px', textDecoration: 'line-through' }}>
-                            ₹{product.o}
+                {product.a && (
+                    <span
+                        className="age"
+                        style={{
+                            color: 'var(--mute)',
+                            fontSize: '0.82rem',
+                            fontWeight: 600
+                        }}
+                    >
+                        {product.a}
+                    </span>
+                )}
+
+                {/* =================================================
+                    PRICE
+                ================================================= */}
+
+                <div
+                    className="price"
+                    style={{
+                        fontWeight: 800,
+                        fontSize: '1.05rem',
+                        margin: '5px 0 8px',
+                        color: 'var(--brand)'
+                    }}
+                >
+                    ₹{price.toLocaleString('en-IN')}
+
+                    {originalPrice > price && (
+                        <s
+                            style={{
+                                color: 'var(--mute)',
+                                fontWeight: 400,
+                                fontSize: '0.85rem',
+                                marginLeft: '7px',
+                                textDecoration: 'line-through'
+                            }}
+                        >
+                            ₹
+                            {originalPrice.toLocaleString('en-IN')}
                         </s>
                     )}
                 </div>
 
-                {/* Add to Cart button */}
+                {/* =================================================
+                    ADD TO CART
+                ================================================= */}
+
                 <button
+                    type="button"
                     className="add btn-primary"
                     data-i={product.id}
-                    onClick={() => onAddToCart(product)}
+                    disabled={!hasStock}
+                    onClick={handleAddToCart}
+                    title={
+                        !stockIsValid
+                            ? 'Stock information is unavailable'
+                            : !hasStock
+                                ? 'This product is out of stock'
+                                : 'Add this product to your cart'
+                    }
                     style={{
                         marginTop: 'auto',
                         width: '100%',
-                        padding: '7px 12px',
-                        fontSize: '0.85rem'
+                        padding: '9px 12px',
+                        fontSize: '0.85rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '7px',
+                        opacity: hasStock ? 1 : 0.55,
+                        cursor: hasStock
+                            ? 'pointer'
+                            : 'not-allowed'
                     }}
                 >
-                    <ShoppingBag size={15} /> Add to cart
+                    <ShoppingBag size={15} />
+
+                    {!stockIsValid
+                        ? 'Stock Unavailable'
+                        : hasStock
+                            ? 'Add to Cart'
+                            : 'Out of Stock'}
                 </button>
             </div>
 
-            <style>{`
-        .img:hover .quick-overlay {
-          opacity: 1 !important;
-        }
-      `}</style>
+            {/* =================================================
+                COMPONENT STYLES
+            ================================================= */}
+
+            <style>
+                {`
+                    .img:hover .quick-overlay {
+                        opacity: 1 !important;
+                    }
+
+                    .product-stock-badge {
+                        max-width: calc(100% - 16px);
+                        text-align: center;
+                    }
+
+                    .card button:disabled {
+                        pointer-events: none;
+                    }
+                `}
+            </style>
         </article>
     );
 }
