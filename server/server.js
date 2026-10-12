@@ -343,44 +343,63 @@ app.get('/api/auth/me', auth(), async (req, res) => {
   }
 });
 
-/* GET PRODUCTS */
+/* GET PRODUCTS - OPTIMIZED */
 app.get('/api/products', async (_req, res) => {
   try {
-    const deletedIds = await getDeletedIds();
+    const [deletedRows, inventoryRows, customProducts] =
+      await Promise.all([
+        DeletedProduct.find()
+          .select('productId -_id')
+          .lean(),
 
-    const builtInProducts = await Promise.all(
-      STATIC_PRODUCTS
-        .filter(product => !deletedIds.has(String(product.id)))
-        .map(async product => {
-          const key = `builtin:${String(product.id)}`;
+        Inventory.find()
+          .select('productKey stock -_id')
+          .lean(),
 
-          const inventory = await Inventory.findOne({
-            productKey: key
-          }).lean();
+        Product.find({
+          source: { $ne: 'builtin' }
+        }).lean()
+      ]);
 
-          return {
-            ...product,
-            legacyId: String(product.id),
-            source: 'builtin',
-            stock: inventory?.stock ?? 0
-          };
-        })
+    const deletedIds = new Set(
+      deletedRows.map(row => String(row.productId))
     );
 
-    const customProducts = await Product.find({
-      source: { $ne: 'builtin' }
-    }).lean();
+    const inventoryMap = new Map(
+      inventoryRows.map(row => [
+        String(row.productKey),
+        row.stock
+      ])
+    );
 
-    res.json([...builtInProducts, ...customProducts]);
+    const builtInProducts = STATIC_PRODUCTS
+      .filter(product => !deletedIds.has(String(product.id)))
+      .map(product => {
+        const key = `builtin:${String(product.id)}`;
+
+        return {
+          ...product,
+          legacyId: String(product.id),
+          source: 'builtin',
+          stock: inventoryMap.get(key) ?? 0
+        };
+      });
+
+    res.set('Cache-Control', 'no-store');
+
+    return res.json([
+      ...builtInProducts,
+      ...customProducts
+    ]);
   } catch (error) {
-    res.status(500).json({
+    console.error('GET PRODUCTS ERROR:', error);
+
+    return res.status(500).json({
       message: 'Unable to fetch products.',
       error: error.message
     });
   }
-});
-
-/* ADD CUSTOM PRODUCT */
+});/* ADD CUSTOM PRODUCT */
 app.post('/api/products', auth('admin'), async (req, res) => {
   try {
     const data = { ...req.body };
