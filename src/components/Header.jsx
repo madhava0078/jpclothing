@@ -131,7 +131,7 @@ export default function Header({
                     }}
                     className="nav-links"
                 >
-                    {['All', 'Girls', 'Boys', 'Infants'].map((cat) => (
+                    {['All', 'Men', 'Women', 'Girls', 'Boys', 'Infants'].map((cat) => (
                         <button
                             key={cat}
                             onClick={() => {
