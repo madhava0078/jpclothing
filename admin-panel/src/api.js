@@ -1,5 +1,5 @@
 const API_BASE =
-  import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  import.meta.env.VITE_API_URL || 'https://jpclothing-api.onrender.com/api';
 
 export const getAdminToken = () =>
   localStorage.getItem('jp_admin_token') || '';
