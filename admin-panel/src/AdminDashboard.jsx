@@ -233,7 +233,7 @@ export default function AdminDashboard({
 
         const productToAdd = {
             id: Date.now(),
-
+            stock: Math.max(0, Number(newProduct.stock) || 0),
             n: newProduct.n.trim(),
 
             c: newProduct.c,
@@ -295,7 +295,8 @@ export default function AdminDashboard({
                 description: '',
                 sizes: '2-3Y, 4-5Y, 6-7Y',
                 colors: '',
-                image: ''
+                image: '',
+                stock: 0
             });
 
             setImagePreview('');
