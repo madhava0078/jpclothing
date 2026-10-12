@@ -318,3 +318,561 @@ app.post('/api/auth/admin-login', async (req, res) => {
     admin: { username, role: 'admin' }
   });
 });
+/* GET CURRENT USER */
+app.get('/api/auth/me', auth(), async (req, res) => {
+  try {
+    if (req.auth.role === 'admin') {
+      return res.json({
+        user: {
+          id: 'admin',
+          username: req.auth.username,
+          role: 'admin'
+        }
+      });
+    }
+
+    const user = await User.findById(req.auth.id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    res.json({ user: publicUser(user) });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+/* GET PRODUCTS */
+app.get('/api/products', async (_req, res) => {
+  try {
+    const deletedIds = await getDeletedIds();
+
+    const builtInProducts = await Promise.all(
+      STATIC_PRODUCTS
+        .filter(product => !deletedIds.has(String(product.id)))
+        .map(async product => {
+          const key = `builtin:${String(product.id)}`;
+
+          const inventory = await Inventory.findOne({
+            productKey: key
+          }).lean();
+
+          return {
+            ...product,
+            legacyId: String(product.id),
+            source: 'builtin',
+            stock: inventory?.stock ?? 0
+          };
+        })
+    );
+
+    const customProducts = await Product.find({
+      source: { $ne: 'builtin' }
+    }).lean();
+
+    res.json([...builtInProducts, ...customProducts]);
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to fetch products.',
+      error: error.message
+    });
+  }
+});
+
+/* ADD CUSTOM PRODUCT */
+app.post('/api/products', auth('admin'), async (req, res) => {
+  try {
+    const data = { ...req.body };
+
+    if (!data.n || !String(data.n).trim()) {
+      return res.status(400).json({
+        message: 'Product name is required.'
+      });
+    }
+
+    if (data.stock !== undefined && !validStock(data.stock)) {
+      return res.status(400).json({
+        message: 'Stock must be a non-negative whole number.'
+      });
+    }
+
+    data.n = String(data.n).trim();
+    data.stock = Number(data.stock ?? 0);
+    data.source = 'custom';
+
+    delete data._id;
+    delete data.inventoryKey;
+
+    const product = await Product.create(data);
+
+    res.status(201).json(product);
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to add product.',
+      error: error.message
+    });
+  }
+});
+
+/* UPDATE PRODUCT STOCK */
+app.patch('/api/products/:id/stock', auth('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stock, source, type } = req.body;
+
+    if (!validStock(stock)) {
+      return res.status(400).json({
+        message: 'Stock must be a non-negative whole number.'
+      });
+    }
+
+    const cleanStock = Number(stock);
+    const productSource = source || type;
+
+    const builtInProduct = STATIC_PRODUCTS.find(
+      product => String(product.id) === String(id)
+    );
+
+    if (
+      builtInProduct &&
+      (productSource === 'builtin' || !productSource)
+    ) {
+      const productKey = `builtin:${String(builtInProduct.id)}`;
+
+      const inventory = await Inventory.findOneAndUpdate(
+        { productKey },
+        {
+          $set: {
+            stock: cleanStock,
+            updatedAt: new Date()
+          }
+        },
+        {
+          new: true,
+          upsert: true,
+          runValidators: true
+        }
+      );
+
+      return res.json({
+        message: 'Stock updated successfully.',
+        id: String(builtInProduct.id),
+        source: 'builtin',
+        stock: inventory.stock
+      });
+    }
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(404).json({
+        message: 'Product not found.'
+      });
+    }
+
+    const product = await Product.findOneAndUpdate(
+      {
+        _id: id,
+        source: { $ne: 'builtin' }
+      },
+      { $set: { stock: cleanStock } },
+      { new: true, runValidators: true }
+    );
+
+    if (!product) {
+      return res.status(404).json({
+        message: 'Product not found.'
+      });
+    }
+
+    res.json({
+      message: 'Stock updated successfully.',
+      product
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to update stock.',
+      error: error.message
+    });
+  }
+});
+
+/* UPDATE CUSTOM PRODUCT */
+app.patch('/api/products/:id', auth('admin'), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(404).json({
+        message: 'Product not found.'
+      });
+    }
+
+    const data = { ...req.body };
+
+    if (data.stock !== undefined && !validStock(data.stock)) {
+      return res.status(400).json({
+        message: 'Stock must be a non-negative whole number.'
+      });
+    }
+
+    delete data._id;
+    delete data.inventoryKey;
+    delete data.source;
+
+    const product = await Product.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        source: { $ne: 'builtin' }
+      },
+      { $set: data },
+      { new: true, runValidators: true }
+    );
+
+    if (!product) {
+      return res.status(404).json({
+        message: 'Product not found.'
+      });
+    }
+
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to update product.',
+      error: error.message
+    });
+  }
+});
+
+/* DELETE PRODUCT */
+app.delete('/api/products/:id', auth('admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const builtInProduct = STATIC_PRODUCTS.find(
+      product => String(product.id) === String(id)
+    );
+
+    if (builtInProduct) {
+      await DeletedProduct.findOneAndUpdate(
+        { productId: String(builtInProduct.id) },
+        {
+          $set: {
+            productId: String(builtInProduct.id),
+            deletedAt: new Date()
+          }
+        },
+        { upsert: true, new: true }
+      );
+
+      return res.json({
+        message: 'Product deleted successfully.'
+      });
+    }
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(404).json({
+        message: 'Product not found.'
+      });
+    }
+
+    const deleted = await Product.findOneAndDelete({
+      _id: id,
+      source: { $ne: 'builtin' }
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        message: 'Product not found.'
+      });
+    }
+
+    await Inventory.deleteOne({
+      productKey: `custom:${id}`
+    });
+
+    res.json({
+      message: 'Product deleted successfully.'
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to delete product.',
+      error: error.message
+    });
+  }
+});
+
+/* RESTORE BUILT-IN PRODUCT */
+app.delete('/api/products/builtin/:id/restore', auth('admin'), async (req, res) => {
+  try {
+    await DeletedProduct.deleteOne({
+      productId: String(req.params.id)
+    });
+
+    res.json({
+      message: 'Product restored successfully.'
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to restore product.',
+      error: error.message
+    });
+  }
+});
+
+/* GET ORDERS */
+app.get('/api/orders', auth(), async (req, res) => {
+  try {
+    const query = req.auth.role === 'admin'
+      ? {}
+      : { userId: req.auth.id };
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to fetch orders.',
+      error: error.message
+    });
+  }
+});
+
+/* CREATE ORDER WITH STOCK VALIDATION */
+app.post('/api/orders', optionalUser, async (req, res) => {
+  const { customer, items, totals, paymentMethod } = req.body;
+
+  if (
+    !customer ||
+    !Array.isArray(items) ||
+    items.length === 0 ||
+    !totals ||
+    !paymentMethod
+  ) {
+    return res.status(400).json({
+      message: 'Invalid order details.'
+    });
+  }
+
+  const requested = new Map();
+
+  for (const item of items) {
+    const quantity = Number(item.quantity ?? item.qty ?? 1);
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({
+        message: 'Invalid product quantity.'
+      });
+    }
+
+    const key = String(item.legacyId ?? item.id ?? item._id ?? '');
+
+    if (!key) {
+      return res.status(400).json({
+        message: 'Invalid product in order.'
+      });
+    }
+
+    requested.set(key, (requested.get(key) || 0) + quantity);
+  }
+
+  const stockChanges = [];
+
+  try {
+    for (const [requestedId, quantity] of requested.entries()) {
+      const item = items.find(
+        product =>
+          String(product.legacyId ?? product.id ?? product._id ?? '') === requestedId
+      );
+
+      const product = await resolveCatalogProduct(item);
+
+      if (!product) {
+        throw new Error(`Product ${requestedId} was not found.`);
+      }
+
+      if (product.source === 'builtin') {
+        const result = await Inventory.findOneAndUpdate(
+          {
+            productKey: product.inventoryKey,
+            stock: { $gte: quantity }
+          },
+          {
+            $inc: { stock: -quantity },
+            $set: { updatedAt: new Date() }
+          },
+          { new: true }
+        );
+
+        if (!result) {
+          throw new Error(
+            `${product.n} has insufficient stock. Available stock: ${product.stock}.`
+          );
+        }
+
+        stockChanges.push({
+          source: 'builtin',
+          productKey: product.inventoryKey,
+          quantity
+        });
+      } else {
+        const result = await Product.findOneAndUpdate(
+          {
+            _id: product._id,
+            stock: { $gte: quantity }
+          },
+          { $inc: { stock: -quantity } },
+          { new: true }
+        );
+
+        if (!result) {
+          throw new Error(
+            `${product.n} has insufficient stock. Available stock: ${product.stock}.`
+          );
+        }
+
+        stockChanges.push({
+          source: 'custom',
+          productKey: String(product._id),
+          quantity
+        });
+      }
+    }
+
+    const orderId = `JP${Date.now()}`;
+
+    const order = await Order.create({
+      id: orderId,
+      userId: req.auth?.role === 'user' ? req.auth.id : null,
+      customer,
+      items,
+      totals,
+      paymentMethod,
+      paymentVerifiedBySeller: false,
+      status: 'Pending'
+    });
+
+    res.status(201).json(order);
+  } catch (error) {
+    for (const change of stockChanges.reverse()) {
+      try {
+        if (change.source === 'builtin') {
+          await Inventory.updateOne(
+            { productKey: change.productKey },
+            { $inc: { stock: change.quantity } }
+          );
+        } else {
+          await Product.updateOne(
+            { _id: change.productKey },
+            { $inc: { stock: change.quantity } }
+          );
+        }
+      } catch (rollbackError) {
+        console.error('Stock rollback failed:', rollbackError);
+      }
+    }
+
+    res.status(400).json({
+      message: error.message || 'Unable to place order.'
+    });
+  }
+});
+/* UPDATE ORDER STATUS */
+app.patch('/api/orders/:id/status', auth('admin'), async (req, res) => {
+  try {
+    const allowedStatuses = [
+      'Pending',
+      'Approved',
+      'Processing',
+      'Shipped',
+      'Delivered',
+      'Cancelled'
+    ];
+
+    const { status } = req.body;
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({
+        message: 'Invalid order status.'
+      });
+    }
+
+    const order = await Order.findOneAndUpdate(
+      { id: req.params.id },
+      { $set: { status } },
+      { new: true }
+    );
+
+    if (!order) {
+      return res.status(404).json({
+        message: 'Order not found.'
+      });
+    }
+
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to update order status.',
+      error: error.message
+    });
+  }
+});
+
+/* DELETE ORDER */
+app.delete('/api/orders/:id', auth('admin'), async (req, res) => {
+  try {
+    const order = await Order.findOneAndDelete({
+      id: req.params.id
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        message: 'Order not found.'
+      });
+    }
+
+    res.json({
+      message: 'Order deleted successfully.'
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to delete order.',
+      error: error.message
+    });
+  }
+});
+
+/* MARK ORDERS AS READ */
+app.patch('/api/orders/mark-read', auth('admin'), async (_req, res) => {
+  try {
+    await Order.updateMany(
+      { isRead: false },
+      { $set: { isRead: true } }
+    );
+
+    res.json({
+      message: 'Orders marked as read.'
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: error.message
+    });
+  }
+});
+
+/* START SERVER */
+async function startServer() {
+  try {
+    await mongoose.connect(MONGODB_URI);
+
+    console.log('MongoDB connected successfully.');
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`JP Clothing API running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Server startup failed:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
