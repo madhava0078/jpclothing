@@ -150,37 +150,51 @@ const orderSchema = new mongoose.Schema({
 
 /* =========================================================
    PRODUCT SCHEMA
-   These are products added through Admin Panel.
+   Supports both built-in and custom products.
 ========================================================= */
 
 const productSchema = new mongoose.Schema(
   {
+    id: mongoose.Schema.Types.Mixed,
+
+    legacyId: {
+      type: String,
+      default: null
+    },
+
+    source: {
+      type: String,
+      enum: ['builtin', 'custom'],
+      default: 'custom'
+    },
+
     n: {
       type: String,
       required: true
     },
 
     c: String,
-
-    a: String,
-
+    a: mongoose.Schema.Types.Mixed,
     p: Number,
-
     o: Number,
-
     t: String,
-
     fabric: String,
-
     description: String,
 
     sizes: Array,
-
     colors: Array,
 
     image: String,
 
-    stock: { type: Number, default: 0, min: 0 },
+    stock: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: Number.isInteger,
+        message: 'Stock must be a whole number.'
+      }
+    },
 
     createdAt: {
       type: Date,
@@ -191,7 +205,6 @@ const productSchema = new mongoose.Schema(
     strict: false
   }
 );
-
 /* =========================================================
    DELETED PRODUCT SCHEMA
    Used for products that originally come from
