@@ -9,22 +9,27 @@ import {
     Image as ImageIcon,
     Package,
     Upload,
-    CheckCircle2
+    CheckCircle2,
+    RefreshCw
 } from 'lucide-react';
 
 export default function AdminDashboard({
-    orders,
-    products,
+    orders = [],
+    products = [],
     onUpdateOrderStatus,
     onDeleteOrder,
     onMarkOrdersRead,
     onLogout,
     onAddProduct,
+    onUpdateProductStock,
     onDeleteProduct
 }) {
     const [activeTab, setActiveTab] = useState('orders');
     const [statusFilter, setStatusFilter] = useState('All');
     const [searchTerm, setSearchTerm] = useState('');
+    const [stockValues, setStockValues] = useState({});
+    const [updatingStock, setUpdatingStock] = useState({});
+    const [newProductLoading, setNewProductLoading] = useState(false);
 
     const [newProduct, setNewProduct] = useState({
         n: '',
@@ -46,9 +51,9 @@ export default function AdminDashboard({
 
     const fileInputRef = useRef(null);
 
-    /* =====================================================
-       PRODUCTS
-       ===================================================== */
+    // =====================================================
+    // PRODUCTS
+    // =====================================================
 
     const allProducts = (products || []).map(product => ({
         ...product,
@@ -56,21 +61,23 @@ export default function AdminDashboard({
         isCustom: product.source !== 'builtin'
     }));
 
-    /*
-     * Remove duplicate IDs
-     */
+    // Remove duplicate products using a stable identifier.
     const uniqueProducts = Array.from(
         new Map(
             allProducts.map(product => [
-                String(product._id || product.id),
+                String(
+                    product._id ||
+                    product.legacyId ||
+                    product.id
+                ),
                 product
             ])
         ).values()
     );
 
-    /* =====================================================
-       ORDERS
-       ===================================================== */
+    // =====================================================
+    // ORDERS
+    // =====================================================
 
     const unreadCount = (orders || []).filter(
         order => !order.isRead
@@ -97,36 +104,141 @@ export default function AdminDashboard({
 
         const matchesSearch =
             !search ||
-            order.id?.toLowerCase().includes(search) ||
-            order.customer?.name
-                ?.toLowerCase()
-                .includes(search) ||
-            order.customer?.phone
-                ?.toLowerCase()
-                .includes(search) ||
-            order.customer?.city
-                ?.toLowerCase()
-                .includes(search);
+            String(order.id || '').toLowerCase().includes(search) ||
+            String(order.customer?.name || '').toLowerCase().includes(search) ||
+            String(order.customer?.phone || '').toLowerCase().includes(search) ||
+            String(order.customer?.city || '').toLowerCase().includes(search);
 
         return matchesStatus && matchesSearch;
     });
 
-    const printInvoice = (order) => {
-        const money = value => `₹${Number(value || 0).toLocaleString('en-IN')}`;
-        const rows = (order.items || []).map(item => `<tr><td>${String(item.n || 'Product').replace(/[<>]/g,'')}</td><td>${item.quantity || 1}</td><td>${money(item.p)}</td><td>${money((item.p || 0) * (item.quantity || 1))}</td></tr>`).join('');
+    // =====================================================
+    // INVOICE PRINT
+    // =====================================================
+
+    const escapeHtml = value =>
+        String(value ?? '').replace(/[&<>"']/g, char => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[char]);
+
+    const money = value =>
+        `₹${Number(value || 0).toLocaleString('en-IN')}`;
+
+    const printInvoice = order => {
+        const rows = (order.items || [])
+            .map(item => `
+                <tr>
+                    <td>${escapeHtml(item.n || 'Product')}</td>
+                    <td>${Number(item.quantity || 1)}</td>
+                    <td>${money(item.p)}</td>
+                    <td>${money(Number(item.p || 0) * Number(item.quantity || 1))}</td>
+                </tr>
+            `)
+            .join('');
+
         const win = window.open('', '_blank', 'width=800,height=900');
-        if (!win) { alert('Allow pop-ups to print the invoice.'); return; }
-        win.document.write(`<!doctype html><html><head><title>Invoice ${order.invoiceNumber || order.id}</title><style>body{font:14px Arial;padding:32px;color:#222}h1{margin-bottom:4px}table{width:100%;border-collapse:collapse;margin-top:24px}th,td{border:1px solid #ddd;padding:10px;text-align:left}th{background:#f6f0e0}.total{text-align:right;font-size:18px;font-weight:bold;margin-top:24px}.muted{color:#666}</style></head><body><h1>JP Clothing</h1><div class="muted">Styles that defines you</div><h2>Invoice</h2><p><b>Invoice No:</b> ${order.invoiceNumber || 'Pending approval'}<br><b>Order ID:</b> ${order.id}<br><b>Date:</b> ${new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN')}</p><p><b>Customer:</b> ${String(order.customer?.name || '').replace(/[<>]/g,'')}<br><b>Phone:</b> ${String(order.customer?.phone || '').replace(/[<>]/g,'')}<br><b>Address:</b> ${String([order.customer?.address,order.customer?.city,order.customer?.pincode].filter(Boolean).join(', ')).replace(/[<>]/g,'')}</p><table><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table><div class="total">Subtotal: ${money(order.totals?.subtotal)}<br>Delivery: ${money(order.totals?.shipping)}<br>Grand Total: ${money(order.totals?.grandTotal)}</div><p>Status: ${order.status}</p><script>window.onload=()=>window.print()</script></body></html>`);
+
+        if (!win) {
+            alert('Allow pop-ups to print the invoice.');
+            return;
+        }
+
+        win.document.write(`
+            <!doctype html>
+            <html>
+            <head>
+                <title>Invoice ${escapeHtml(order.invoiceNumber || order.id)}</title>
+                <style>
+                    body {
+                        font: 14px Arial, sans-serif;
+                        padding: 32px;
+                        color: #222;
+                    }
+                    h1 { margin-bottom: 4px; }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 24px;
+                    }
+                    th, td {
+                        border: 1px solid #ddd;
+                        padding: 10px;
+                        text-align: left;
+                    }
+                    th { background: #f6f0e0; }
+                    .total {
+                        text-align: right;
+                        font-size: 18px;
+                        font-weight: bold;
+                        margin-top: 24px;
+                        line-height: 1.8;
+                    }
+                    .muted { color: #666; }
+                </style>
+            </head>
+            <body>
+                <h1>JP Clothing</h1>
+                <div class="muted">Styles that defines you</div>
+                <h2>Invoice</h2>
+
+                <p>
+                    <b>Invoice No:</b> ${escapeHtml(order.invoiceNumber || 'Pending approval')}<br>
+                    <b>Order ID:</b> ${escapeHtml(order.id)}<br>
+                    <b>Date:</b> ${escapeHtml(new Date(order.createdAt || Date.now()).toLocaleDateString('en-IN'))}
+                </p>
+
+                <p>
+                    <b>Customer:</b> ${escapeHtml(order.customer?.name)}<br>
+                    <b>Phone:</b> ${escapeHtml(order.customer?.phone)}<br>
+                    <b>Address:</b> ${escapeHtml([
+                        order.customer?.address,
+                        order.customer?.city,
+                        order.customer?.pincode
+                    ].filter(Boolean).join(', '))}
+                </p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th>Qty</th>
+                            <th>Price</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+
+                <div class="total">
+                    Subtotal: ${money(order.totals?.subtotal)}<br>
+                    Delivery: ${money(order.totals?.shipping)}<br>
+                    Grand Total: ${money(order.totals?.grandTotal)}
+                </div>
+
+                <p>Status: ${escapeHtml(order.status)}</p>
+
+                <script>
+                    window.onload = () => window.print();
+                </script>
+            </body>
+            </html>
+        `);
+
         win.document.close();
     };
 
-    /* =====================================================
-       STATUS COLORS
-       ===================================================== */
+    // =====================================================
+    // STATUS COLORS
+    // =====================================================
 
     const getStatusColor = status => {
         switch (status) {
             case 'Delivered':
+            case 'Approved':
                 return {
                     bg: '#14532d',
                     color: '#86efac'
@@ -144,12 +256,6 @@ export default function AdminDashboard({
                     color: '#fde047'
                 };
 
-            case 'Approved':
-                return {
-                    bg: '#14532d',
-                    color: '#86efac'
-                };
-
             case 'Cancelled':
                 return {
                     bg: '#7f1d1d',
@@ -164,17 +270,24 @@ export default function AdminDashboard({
         }
     };
 
-    /* =====================================================
-       IMAGE UPLOAD
-       ===================================================== */
+    // =====================================================
+    // IMAGE UPLOAD
+    // =====================================================
 
     const handleImageUpload = event => {
         const file = event.target.files?.[0];
 
         if (!file) return;
 
+        if (!file.type.startsWith('image/')) {
+            alert('Please select an image file.');
+            event.target.value = '';
+            return;
+        }
+
         if (file.size > 5 * 1024 * 1024) {
-            alert('Image size must be below 5MB');
+            alert('Image size must be below 5MB.');
+            event.target.value = '';
             return;
         }
 
@@ -194,20 +307,39 @@ export default function AdminDashboard({
         reader.readAsDataURL(file);
     };
 
-    /* =====================================================
-       ADD PRODUCT
-       ===================================================== */
+    // =====================================================
+    // ADD PRODUCT
+    // =====================================================
 
     const handleAddNewProduct = async event => {
         event.preventDefault();
 
+        if (newProductLoading) return;
+
         if (!newProduct.n.trim()) {
-            alert('Enter product name');
+            alert('Enter product name.');
             return;
         }
 
-        if (!newProduct.p) {
-            alert('Enter selling price');
+        const price = Number(newProduct.p);
+        const stock = Number(newProduct.stock);
+        const mrp = newProduct.o === '' ? null : Number(newProduct.o);
+
+        if (!Number.isFinite(price) || price <= 0) {
+            alert('Enter a valid selling price.');
+            return;
+        }
+
+        if (!Number.isInteger(stock) || stock < 0) {
+            alert('Stock must be a non-negative whole number.');
+            return;
+        }
+
+        if (
+            mrp !== null &&
+            (!Number.isFinite(mrp) || mrp < 0)
+        ) {
+            alert('Enter a valid MRP.');
             return;
         }
 
@@ -218,70 +350,51 @@ export default function AdminDashboard({
 
         const colorsArray = newProduct.colors
             ? newProduct.colors
-                  .split(',')
-                  .map(color => ({
-                      name: color.trim(),
-                      hex: '#cccccc'
-                  }))
-                  .filter(color => color.name)
+                .split(',')
+                .map(color => ({
+                    name: color.trim(),
+                    hex: '#cccccc'
+                }))
+                .filter(color => color.name)
             : [
-                  {
-                      name: 'Default',
-                      hex: '#cccccc'
-                  }
-              ];
+                {
+                    name: 'Default',
+                    hex: '#cccccc'
+                }
+            ];
 
         const productToAdd = {
             id: Date.now(),
-            stock: Math.max(0, Number(newProduct.stock) || 0),
+            stock,
             n: newProduct.n.trim(),
-
             c: newProduct.c,
-
             a: newProduct.a,
-
-            p: Number(newProduct.p),
-
-            o: newProduct.o
-                ? Number(newProduct.o)
-                : null,
-
+            p: price,
+            o: mrp,
             k: 'dress',
-
             bg: '#fbd5df',
-
             fg: '#c2410c',
-
             t: newProduct.t || 'New',
-
             image: newProduct.image || '',
-
             rating: 5,
-
             reviewsCount: 0,
-
-            fabric:
-                newProduct.fabric ||
-                'Premium Quality',
-
-            sizes:
-                sizesArray.length > 0
-                    ? sizesArray
-                    : ['Free Size'],
-
+            fabric: newProduct.fabric || 'Premium Quality',
+            sizes: sizesArray.length > 0 ? sizesArray : ['Free Size'],
             colors: colorsArray,
-
             description:
                 newProduct.description ||
-                `${newProduct.n} - Premium quality product from JP Clothing.`,
-
-            washCare:
-                'Machine wash cold with like colors.',
-
+                `${newProduct.n.trim()} - Premium quality product from JP Clothing.`,
+            washCare: 'Machine wash cold with like colors.',
             isCustom: true
         };
 
         try {
+            setNewProductLoading(true);
+
+            if (typeof onAddProduct !== 'function') {
+                throw new Error('Add product function is not connected.');
+            }
+
             await onAddProduct(productToAdd);
 
             setNewProduct({
@@ -301,26 +414,87 @@ export default function AdminDashboard({
 
             setImagePreview('');
 
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+
             setAddSuccess(true);
 
-            setTimeout(() => {
+            window.setTimeout(() => {
                 setAddSuccess(false);
             }, 3000);
         } catch (error) {
-            alert(
-                error?.message ||
-                'Unable to add product'
-            );
+            alert(error?.message || 'Unable to add product.');
+        } finally {
+            setNewProductLoading(false);
         }
     };
 
-    /* =====================================================
-       DELETE PRODUCT
-       ===================================================== */
+    // =====================================================
+    // UPDATE EXISTING PRODUCT STOCK
+    // =====================================================
+
+    const getProductId = product =>
+        product._id || product.legacyId || product.id;
+
+    const handleUpdateStock = async product => {
+        const productId = getProductId(product);
+        const productKey = String(productId ?? '');
+
+        const rawStock = stockValues[productKey] !== undefined
+            ? stockValues[productKey]
+            : String(product.stock ?? 0);
+
+        const stock = Number(rawStock);
+
+        if (!productId) {
+            alert('Product ID not found.');
+            return;
+        }
+
+        if (String(rawStock).trim() === '' ||
+            !Number.isInteger(stock) ||
+            stock < 0) {
+            alert('Enter a valid non-negative whole-number stock quantity.');
+            return;
+        }
+
+        if (typeof onUpdateProductStock !== 'function') {
+            alert(
+                'Stock update is not connected. Check admin-panel/src/App.jsx and admin-panel/src/lib/api.js.'
+            );
+            return;
+        }
+
+        try {
+            setUpdatingStock(prev => ({
+                ...prev,
+                [productKey]: true
+            }));
+
+            await onUpdateProductStock(
+                productId,
+                stock,
+                product.source === 'builtin' ? 'builtin' : 'custom'
+            );
+
+            alert(`Stock updated successfully for "${product.n}".`);
+        } catch (error) {
+            alert(error?.message || 'Unable to update stock.');
+        } finally {
+            setUpdatingStock(prev => ({
+                ...prev,
+                [productKey]: false
+            }));
+        }
+    };
+
+    // =====================================================
+    // DELETE PRODUCT
+    // =====================================================
 
     const handleDeleteProduct = async product => {
-        const productId =
-            product._id || product.id;
+        const productId = getProductId(product);
 
         if (!productId) {
             alert('Product ID not found.');
@@ -333,28 +507,26 @@ export default function AdminDashboard({
 
         if (!confirmed) return;
 
+        if (typeof onDeleteProduct !== 'function') {
+            alert('Delete product function is not connected.');
+            return;
+        }
+
         try {
             await onDeleteProduct(
                 productId,
-                product.source === 'builtin'
-                    ? 'builtin'
-                    : 'custom'
+                product.source === 'builtin' ? 'builtin' : 'custom'
             );
 
-            alert(
-                `"${product.n}" deleted successfully.`
-            );
+            alert(`"${product.n}" deleted successfully.`);
         } catch (error) {
-            alert(
-                error?.message ||
-                'Unable to delete product.'
-            );
+            alert(error?.message || 'Unable to delete product.');
         }
     };
 
-    /* =====================================================
-       STYLES
-       ===================================================== */
+    // =====================================================
+    // STYLES
+    // =====================================================
 
     const tabBtnStyle = active => ({
         padding: '8px 18px',
@@ -362,12 +534,8 @@ export default function AdminDashboard({
         border: active
             ? '2px solid var(--brand)'
             : '1px solid var(--line)',
-        background: active
-            ? 'var(--brand)'
-            : 'var(--card)',
-        color: active
-            ? 'var(--brand-ink)'
-            : 'var(--ink)',
+        background: active ? 'var(--brand)' : 'var(--card)',
+        color: active ? 'var(--brand-ink)' : 'var(--ink)',
         fontWeight: 800,
         fontSize: '0.85rem',
         cursor: 'pointer',
@@ -378,6 +546,7 @@ export default function AdminDashboard({
 
     const inputStyle = {
         width: '100%',
+        boxSizing: 'border-box',
         padding: '10px 14px',
         borderRadius: '8px',
         border: '1px solid var(--line)',
@@ -394,9 +563,9 @@ export default function AdminDashboard({
         marginBottom: '5px'
     };
 
-    /* =====================================================
-       UI
-       ===================================================== */
+    // =====================================================
+    // UI
+    // =====================================================
 
     return (
         <div
@@ -411,20 +580,21 @@ export default function AdminDashboard({
                 overflowY: 'auto'
             }}
         >
-            {/* ================= NAVBAR ================= */}
+            {/* NAVBAR */}
 
             <div
                 style={{
                     background: 'var(--card)',
-                    borderBottom:
-                        '1px solid var(--line)',
+                    borderBottom: '1px solid var(--line)',
                     padding: '12px 24px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     position: 'sticky',
                     top: 0,
-                    zIndex: 10
+                    zIndex: 10,
+                    gap: '12px',
+                    flexWrap: 'wrap'
                 }}
             >
                 <div
@@ -440,8 +610,8 @@ export default function AdminDashboard({
                             height: '38px',
                             borderRadius: '50%',
                             overflow: 'hidden',
-                            border:
-                                '1px solid var(--brand)'
+                            border: '1px solid var(--brand)',
+                            flexShrink: 0
                         }}
                     >
                         <img
@@ -458,8 +628,7 @@ export default function AdminDashboard({
                     <div>
                         <div
                             style={{
-                                fontFamily:
-                                    'Cinzel, serif',
+                                fontFamily: 'Cinzel, serif',
                                 fontWeight: 800,
                                 fontSize: '1.15rem'
                             }}
@@ -483,16 +652,17 @@ export default function AdminDashboard({
                     style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '16px'
+                        gap: '12px'
                     }}
                 >
                     <button
+                        type="button"
                         onClick={onMarkOrdersRead}
+                        title="Mark orders as read"
                         style={{
                             position: 'relative',
                             background: 'var(--bg)',
-                            border:
-                                '1px solid var(--line)',
+                            border: '1px solid var(--line)',
                             borderRadius: '50%',
                             width: '42px',
                             height: '42px',
@@ -504,11 +674,7 @@ export default function AdminDashboard({
                     >
                         <Bell
                             size={20}
-                            color={
-                                unreadCount > 0
-                                    ? 'var(--brand)'
-                                    : 'var(--ink)'
-                            }
+                            color={unreadCount > 0 ? 'var(--brand)' : 'var(--ink)'}
                         />
 
                         {unreadCount > 0 && (
@@ -517,8 +683,7 @@ export default function AdminDashboard({
                                     position: 'absolute',
                                     top: '-4px',
                                     right: '-4px',
-                                    background:
-                                        'var(--accent)',
+                                    background: 'var(--accent)',
                                     color: '#fff',
                                     fontWeight: 800,
                                     fontSize: '0.74rem',
@@ -536,15 +701,14 @@ export default function AdminDashboard({
                     </button>
 
                     <button
+                        type="button"
                         onClick={onLogout}
                         style={{
-                            background:
-                                'transparent',
+                            background: 'transparent',
                             color: 'var(--brand)',
-                            border:
-                                '1px solid var(--brand)',
+                            border: '1px solid var(--brand)',
                             borderRadius: '999px',
-                            padding: '6px 16px',
+                            padding: '8px 16px',
                             fontWeight: 800,
                             cursor: 'pointer',
                             display: 'flex',
@@ -558,18 +722,18 @@ export default function AdminDashboard({
                 </div>
             </div>
 
-            {/* ================= MAIN ================= */}
+            {/* MAIN */}
 
             <div
                 style={{
                     maxWidth: '1200px',
                     width: '100%',
+                    boxSizing: 'border-box',
                     margin: '0 auto',
-                    padding:
-                        '24px 16px 48px'
+                    padding: '24px 16px 48px'
                 }}
             >
-                {/* ================= TABS ================= */}
+                {/* TABS */}
 
                 <div
                     style={{
@@ -580,42 +744,27 @@ export default function AdminDashboard({
                     }}
                 >
                     <button
-                        onClick={() =>
-                            setActiveTab('orders')
-                        }
-                        style={tabBtnStyle(
-                            activeTab === 'orders'
-                        )}
+                        type="button"
+                        onClick={() => setActiveTab('orders')}
+                        style={tabBtnStyle(activeTab === 'orders')}
                     >
                         <ShoppingBag size={16} />
-                        Orders
-                        {orders.length > 0 &&
-                            ` (${orders.length})`}
+                        Orders ({orders.length})
                     </button>
 
                     <button
-                        onClick={() =>
-                            setActiveTab('products')
-                        }
-                        style={tabBtnStyle(
-                            activeTab === 'products'
-                        )}
+                        type="button"
+                        onClick={() => setActiveTab('products')}
+                        style={tabBtnStyle(activeTab === 'products')}
                     >
                         <Package size={16} />
-                        My Products
-                        {uniqueProducts.length > 0 &&
-                            ` (${uniqueProducts.length})`}
+                        My Products ({uniqueProducts.length})
                     </button>
 
                     <button
-                        onClick={() =>
-                            setActiveTab(
-                                'addProduct'
-                            )
-                        }
-                        style={tabBtnStyle(
-                            activeTab === 'addProduct'
-                        )}
+                        type="button"
+                        onClick={() => setActiveTab('addProduct')}
+                        style={tabBtnStyle(activeTab === 'addProduct')}
                     >
                         <Plus size={16} />
                         Add New Product
@@ -631,600 +780,329 @@ export default function AdminDashboard({
                         <div
                             style={{
                                 display: 'grid',
-                                gridTemplateColumns:
-                                    'repeat(auto-fit,minmax(220px,1fr))',
+                                gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))',
                                 gap: '16px',
-                                marginBottom:
-                                    '28px'
+                                marginBottom: '28px'
                             }}
                         >
-                            <div
-                                style={{
-                                    background:
-                                        'var(--card)',
-                                    border:
-                                        '1px solid var(--line)',
-                                    borderRadius:
-                                        'var(--radius-md)',
-                                    padding: '20px'
-                                }}
-                            >
+                            {[
+                                {
+                                    label: 'TOTAL REVENUE',
+                                    value: money(totalRevenue),
+                                    color: 'var(--brand)'
+                                },
+                                {
+                                    label: 'TOTAL ORDERS',
+                                    value: orders.length
+                                },
+                                {
+                                    label: 'NEW NOTIFICATIONS',
+                                    value: unreadCount,
+                                    color: unreadCount > 0 ? 'var(--brand)' : 'var(--ink)'
+                                },
+                                {
+                                    label: 'PENDING DISPATCH',
+                                    value: pendingCount,
+                                    color: '#f5d061'
+                                }
+                            ].map(card => (
                                 <div
+                                    key={card.label}
                                     style={{
-                                        color:
-                                            'var(--mute)',
-                                        fontSize:
-                                            '0.85rem',
-                                        fontWeight: 700
+                                        background: 'var(--card)',
+                                        border: '1px solid var(--line)',
+                                        borderRadius: 'var(--radius-md)',
+                                        padding: '20px'
                                     }}
                                 >
-                                    TOTAL REVENUE
-                                </div>
+                                    <div
+                                        style={{
+                                            color: 'var(--mute)',
+                                            fontSize: '0.85rem',
+                                            fontWeight: 700
+                                        }}
+                                    >
+                                        {card.label}
+                                    </div>
 
-                                <div
-                                    style={{
-                                        fontSize:
-                                            '1.8rem',
-                                        fontWeight: 800,
-                                        color:
-                                            'var(--brand)',
-                                        marginTop:
-                                            '6px'
-                                    }}
-                                >
-                                    ₹
-                                    {totalRevenue.toLocaleString(
-                                        'en-IN'
-                                    )}
+                                    <div
+                                        style={{
+                                            fontSize: '1.8rem',
+                                            fontWeight: 800,
+                                            color: card.color || 'var(--ink)',
+                                            marginTop: '6px'
+                                        }}
+                                    >
+                                        {card.value}
+                                    </div>
                                 </div>
-                            </div>
-
-                            <div
-                                style={{
-                                    background:
-                                        'var(--card)',
-                                    border:
-                                        '1px solid var(--line)',
-                                    borderRadius:
-                                        'var(--radius-md)',
-                                    padding: '20px'
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        color:
-                                            'var(--mute)',
-                                        fontSize:
-                                            '0.85rem',
-                                        fontWeight: 700
-                                    }}
-                                >
-                                    TOTAL ORDERS
-                                </div>
-
-                                <div
-                                    style={{
-                                        fontSize:
-                                            '1.8rem',
-                                        fontWeight: 800,
-                                        marginTop:
-                                            '6px'
-                                    }}
-                                >
-                                    {orders.length}
-                                </div>
-                            </div>
-
-                            <div
-                                style={{
-                                    background:
-                                        'var(--card)',
-                                    border:
-                                        '1px solid var(--line)',
-                                    borderRadius:
-                                        'var(--radius-md)',
-                                    padding: '20px'
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        color:
-                                            'var(--mute)',
-                                        fontSize:
-                                            '0.85rem',
-                                        fontWeight: 700
-                                    }}
-                                >
-                                    NEW NOTIFICATIONS
-                                </div>
-
-                                <div
-                                    style={{
-                                        fontSize:
-                                            '1.8rem',
-                                        fontWeight: 800,
-                                        color:
-                                            unreadCount >
-                                            0
-                                                ? 'var(--brand)'
-                                                : 'var(--ink)',
-                                        marginTop:
-                                            '6px'
-                                    }}
-                                >
-                                    {unreadCount}
-                                </div>
-                            </div>
-
-                            <div
-                                style={{
-                                    background:
-                                        'var(--card)',
-                                    border:
-                                        '1px solid var(--line)',
-                                    borderRadius:
-                                        'var(--radius-md)',
-                                    padding: '20px'
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        color:
-                                            'var(--mute)',
-                                        fontSize:
-                                            '0.85rem',
-                                        fontWeight: 700
-                                    }}
-                                >
-                                    PENDING DISPATCH
-                                </div>
-
-                                <div
-                                    style={{
-                                        fontSize:
-                                            '1.8rem',
-                                        fontWeight: 800,
-                                        color:
-                                            '#f5d061',
-                                        marginTop:
-                                            '6px'
-                                    }}
-                                >
-                                    {pendingCount}
-                                </div>
-                            </div>
+                            ))}
                         </div>
 
                         {/* ORDERS TABLE */}
 
                         <div
                             style={{
-                                background:
-                                    'var(--card)',
-                                border:
-                                    '1px solid var(--line)',
-                                borderRadius:
-                                    'var(--radius-lg)',
+                                background: 'var(--card)',
+                                border: '1px solid var(--line)',
+                                borderRadius: 'var(--radius-lg)',
                                 overflow: 'hidden'
                             }}
                         >
                             <div
                                 style={{
-                                    padding:
-                                        '16px 20px',
-                                    borderBottom:
-                                        '1px solid var(--line)',
+                                    padding: '16px 20px',
+                                    borderBottom: '1px solid var(--line)',
                                     display: 'flex',
                                     flexWrap: 'wrap',
                                     gap: '12px',
-                                    alignItems:
-                                        'center',
-                                    justifyContent:
-                                        'space-between'
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between'
                                 }}
                             >
                                 <h2
                                     style={{
-                                        fontSize:
-                                            '1.25rem',
-                                        color:
-                                            'var(--brand)'
+                                        fontSize: '1.25rem',
+                                        color: 'var(--brand)',
+                                        margin: 0
                                     }}
                                 >
-                                    Live JP CLOTHING
-                                    Orders (
-                                    {
-                                        filteredOrders.length
-                                    }
-                                    )
+                                    Live JP CLOTHING Orders ({filteredOrders.length})
                                 </h2>
 
                                 <div
                                     style={{
                                         display: 'flex',
                                         gap: '8px',
-                                        flexWrap:
-                                            'wrap'
+                                        flexWrap: 'wrap'
                                     }}
                                 >
                                     <select
-                                        value={
-                                            statusFilter
-                                        }
-                                        onChange={e =>
-                                            setStatusFilter(
-                                                e.target
-                                                    .value
-                                            )
-                                        }
+                                        value={statusFilter}
+                                        onChange={e => setStatusFilter(e.target.value)}
                                         style={{
-                                            padding:
-                                                '7px 10px',
-                                            borderRadius:
-                                                '8px',
-                                            border:
-                                                '1px solid var(--line)',
-                                            background:
-                                                'var(--card)',
-                                            color:
-                                                'var(--ink)'
+                                            padding: '7px 10px',
+                                            borderRadius: '8px',
+                                            border: '1px solid var(--line)',
+                                            background: 'var(--card)',
+                                            color: 'var(--ink)'
                                         }}
                                     >
-                                        <option>
-                                            All
-                                        </option>
-                                        <option>
-                                            Pending
-                                        </option>
-                                        <option>
-                                            Approved
-                                        </option>
-                                        <option>
-                                            Processing
-                                        </option>
-                                        <option>
-                                            Shipped
-                                        </option>
-                                        <option>
-                                            Delivered
-                                        </option>
-                                        <option>
-                                            Cancelled
-                                        </option>
+                                        {[
+                                            'All',
+                                            'Pending',
+                                            'Approved',
+                                            'Processing',
+                                            'Shipped',
+                                            'Delivered',
+                                            'Cancelled'
+                                        ].map(status => (
+                                            <option key={status} value={status}>
+                                                {status}
+                                            </option>
+                                        ))}
                                     </select>
 
                                     <div
                                         style={{
-                                            position:
-                                                'relative',
-                                            width:
-                                                '220px'
+                                            position: 'relative',
+                                            width: '220px',
+                                            maxWidth: '100%'
                                         }}
                                     >
                                         <Search
                                             size={14}
                                             style={{
-                                                position:
-                                                    'absolute',
-                                                left:
-                                                    '10px',
-                                                top:
-                                                    '50%',
-                                                transform:
-                                                    'translateY(-50%)',
-                                                color:
-                                                    'var(--mute)'
+                                                position: 'absolute',
+                                                left: '10px',
+                                                top: '50%',
+                                                transform: 'translateY(-50%)',
+                                                color: 'var(--mute)'
                                             }}
                                         />
 
                                         <input
                                             placeholder="Search order..."
-                                            value={
-                                                searchTerm
-                                            }
-                                            onChange={e =>
-                                                setSearchTerm(
-                                                    e.target
-                                                        .value
-                                                )
-                                            }
+                                            value={searchTerm}
+                                            onChange={e => setSearchTerm(e.target.value)}
                                             style={{
-                                                width:
-                                                    '100%',
-                                                padding:
-                                                    '7px 10px 7px 30px',
-                                                borderRadius:
-                                                    '8px',
-                                                border:
-                                                    '1px solid var(--line)',
-                                                background:
-                                                    'var(--card)',
-                                                color:
-                                                    'var(--ink)'
+                                                ...inputStyle,
+                                                padding: '7px 10px 7px 30px'
                                             }}
                                         />
                                     </div>
                                 </div>
                             </div>
 
-                            <div
-                                style={{
-                                    overflowX:
-                                        'auto'
-                                }}
-                            >
+                            <div style={{ overflowX: 'auto' }}>
                                 <table
                                     style={{
                                         width: '100%',
-                                        borderCollapse:
-                                            'collapse',
-                                        textAlign:
-                                            'left'
+                                        borderCollapse: 'collapse',
+                                        textAlign: 'left'
                                     }}
                                 >
                                     <thead>
                                         <tr>
-                                            <th
-                                                style={{
-                                                    padding:
-                                                        '12px'
-                                                }}
-                                            >
-                                                Order ID
-                                            </th>
-
-                                            <th
-                                                style={{
-                                                    padding:
-                                                        '12px'
-                                                }}
-                                            >
-                                                Customer
-                                            </th>
-
-                                            <th
-                                                style={{
-                                                    padding:
-                                                        '12px'
-                                                }}
-                                            >
-                                                Items
-                                            </th>
-
-                                            <th
-                                                style={{
-                                                    padding:
-                                                        '12px'
-                                                }}
-                                            >
-                                                Total
-                                            </th>
-
-                                            <th
-                                                style={{
-                                                    padding:
-                                                        '12px'
-                                                }}
-                                            >
-                                                Status
-                                            </th>
-
-                                            <th
-                                                style={{
-                                                    padding:
-                                                        '12px',
-                                                    textAlign: 'center'
-                                                }}
-                                            >
-                                                Action
-                                            </th>
+                                            {[
+                                                'Order ID',
+                                                'Customer',
+                                                'Items',
+                                                'Total',
+                                                'Status',
+                                                'Action'
+                                            ].map(title => (
+                                                <th
+                                                    key={title}
+                                                    style={{
+                                                        padding: '12px',
+                                                        textAlign: title === 'Action' ? 'center' : 'left'
+                                                    }}
+                                                >
+                                                    {title}
+                                                </th>
+                                            ))}
                                         </tr>
                                     </thead>
 
                                     <tbody>
-                                        {filteredOrders.map(
-                                            order => {
-                                                const color =
-                                                    getStatusColor(
-                                                        order.status
-                                                    );
+                                        {filteredOrders.map(order => {
+                                            const color = getStatusColor(order.status);
 
-                                                return (
-                                                    <tr
-                                                        key={
-                                                            order.id
-                                                        }
+                                            return (
+                                                <tr
+                                                    key={order.id}
+                                                    style={{
+                                                        borderTop: '1px solid var(--line)'
+                                                    }}
+                                                >
+                                                    <td
                                                         style={{
-                                                            borderTop:
-                                                                '1px solid var(--line)'
+                                                            padding: '14px',
+                                                            color: 'var(--brand)',
+                                                            fontWeight: 800
                                                         }}
                                                     >
-                                                        <td
+                                                        {order.id}
+                                                    </td>
+
+                                                    <td style={{ padding: '14px' }}>
+                                                        <strong>{order.customer?.name || 'Customer'}</strong>
+
+                                                        <div
                                                             style={{
-                                                                padding:
-                                                                    '14px',
-                                                                color:
-                                                                    'var(--brand)',
-                                                                fontWeight:
-                                                                    800
+                                                                fontSize: '0.78rem',
+                                                                color: 'var(--mute)'
                                                             }}
                                                         >
-                                                            {
-                                                                order.id
-                                                            }
-                                                        </td>
+                                                            📞 {order.customer?.phone || '—'}
+                                                        </div>
+                                                    </td>
 
-                                                        <td
-                                                            style={{
-                                                                padding:
-                                                                    '14px'
-                                                            }}
-                                                        >
-                                                            <strong>
-                                                                {
-                                                                    order
-                                                                        .customer
-                                                                        ?.name
-                                                                }
-                                                            </strong>
-
-                                                            <div
-                                                                style={{
-                                                                    fontSize:
-                                                                        '0.78rem',
-                                                                    color:
-                                                                        'var(--mute)'
-                                                                }}
-                                                            >
-                                                                📞{' '}
-                                                                {
-                                                                    order
-                                                                        .customer
-                                                                        ?.phone
-                                                                }
+                                                    <td style={{ padding: '14px' }}>
+                                                        {(order.items || []).map((item, index) => (
+                                                            <div key={`${order.id}-${index}`}>
+                                                                • {item.n || 'Product'} × {item.quantity || 1}
                                                             </div>
-                                                        </td>
+                                                        ))}
+                                                    </td>
 
-                                                        <td
-                                                            style={{
-                                                                padding:
-                                                                    '14px'
-                                                            }}
-                                                        >
-                                                            {order.items?.map(
-                                                                (
-                                                                    item,
-                                                                    index
-                                                                ) => (
-                                                                    <div
-                                                                        key={
-                                                                            index
-                                                                        }
-                                                                    >
-                                                                        •{' '}
-                                                                        {
-                                                                            item.n
-                                                                        }{' '}
-                                                                        x{' '}
-                                                                        {
-                                                                            item.quantity ||
-                                                                            1
-                                                                        }
-                                                                    </div>
+                                                    <td
+                                                        style={{
+                                                            padding: '14px',
+                                                            color: 'var(--brand)',
+                                                            fontWeight: 800
+                                                        }}
+                                                    >
+                                                        {money(order.totals?.grandTotal)}
+                                                    </td>
+
+                                                    <td style={{ padding: '14px' }}>
+                                                        <select
+                                                            value={order.status || 'Pending'}
+                                                            onChange={e =>
+                                                                onUpdateOrderStatus?.(
+                                                                    order.id,
+                                                                    e.target.value
                                                                 )
-                                                            )}
-                                                        </td>
-
-                                                        <td
-                                                            style={{
-                                                                padding:
-                                                                    '14px',
-                                                                color:
-                                                                    'var(--brand)',
-                                                                fontWeight:
-                                                                    800
-                                                            }}
-                                                        >
-                                                            ₹
-                                                            {
-                                                                order
-                                                                    .totals
-                                                                    ?.grandTotal
                                                             }
-                                                        </td>
-
-                                                        <td
                                                             style={{
-                                                                padding:
-                                                                    '14px'
+                                                                background: color.bg,
+                                                                color: color.color,
+                                                                borderRadius: '999px',
+                                                                padding: '6px 12px',
+                                                                fontWeight: 800
                                                             }}
                                                         >
-                                                            <select
-                                                                value={
-                                                                    order.status
-                                                                }
-                                                                onChange={e =>
-                                                                    onUpdateOrderStatus(
-                                                                        order.id,
-                                                                        e
-                                                                            .target
-                                                                            .value
-                                                                    )
-                                                                }
-                                                                style={{
-                                                                    background:
-                                                                        color.bg,
-                                                                    color:
-                                                                        color.color,
-                                                                    borderRadius:
-                                                                        '999px',
-                                                                    padding:
-                                                                        '6px 12px',
-                                                                    fontWeight:
-                                                                        800
-                                                                }}
-                                                            >
-                                                                <option value="Pending">
-                                                                    🕒
-                                                                    Pending
-                                                                </option>
+                                                            <option value="Pending">🕒 Pending</option>
+                                                            <option value="Approved">✅ Approved</option>
+                                                            <option value="Processing">📦 Processing</option>
+                                                            <option value="Shipped">🚚 Shipped</option>
+                                                            <option value="Delivered">✅ Delivered</option>
+                                                            <option value="Cancelled">❌ Cancelled</option>
+                                                        </select>
 
-                                                                <option value="Approved">
-                                                                    ✅
-                                                                    Approved
-                                                                </option>
-
-                                                                <option value="Processing">
-                                                                    📦
-                                                                    Processing
-                                                                </option>
-
-                                                                <option value="Shipped">
-                                                                    🚚
-                                                                    Shipped
-                                                                </option>
-
-                                                                <option value="Delivered">
-                                                                    ✅
-                                                                    Delivered
-                                                                </option>
-
-                                                                <option value="Cancelled">
-                                                                    ❌
-                                                                    Cancelled
-                                                                </option>
-                                                            </select>
-                                                            <button type="button" onClick={() => printInvoice(order)} style={{display:'block',marginTop:8,padding:'7px 10px',borderRadius:8,border:'1px solid var(--brand)',background:'transparent',color:'var(--brand)',fontWeight:800,cursor:'pointer'}}>View / Print Invoice</button>
-                                                        </td>
-
-                                                        <td
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => printInvoice(order)}
                                                             style={{
-                                                                padding: '14px',
-                                                                textAlign: 'center'
+                                                                display: 'block',
+                                                                marginTop: '8px',
+                                                                padding: '7px 10px',
+                                                                borderRadius: '8px',
+                                                                border: '1px solid var(--brand)',
+                                                                background: 'transparent',
+                                                                color: 'var(--brand)',
+                                                                fontWeight: 800,
+                                                                cursor: 'pointer'
                                                             }}
                                                         >
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => onDeleteOrder?.(order.id)}
-                                                                title="Delete order"
-                                                                style={{
-                                                                    border: '1px solid #7f1d1d',
-                                                                    background: '#450a0a',
-                                                                    color: '#fca5a5',
-                                                                    borderRadius: '8px',
-                                                                    padding: '8px 10px',
-                                                                    cursor: 'pointer',
-                                                                    display: 'inline-flex',
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center'
-                                                                }}
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            }
+                                                            View / Print Invoice
+                                                        </button>
+                                                    </td>
+
+                                                    <td
+                                                        style={{
+                                                            padding: '14px',
+                                                            textAlign: 'center'
+                                                        }}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => onDeleteOrder?.(order.id)}
+                                                            title="Delete order"
+                                                            style={{
+                                                                border: '1px solid #7f1d1d',
+                                                                background: '#450a0a',
+                                                                color: '#fca5a5',
+                                                                borderRadius: '8px',
+                                                                padding: '8px 10px',
+                                                                cursor: 'pointer',
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center'
+                                                            }}
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+
+                                        {filteredOrders.length === 0 && (
+                                            <tr>
+                                                <td
+                                                    colSpan={6}
+                                                    style={{
+                                                        padding: '32px',
+                                                        textAlign: 'center',
+                                                        color: 'var(--mute)'
+                                                    }}
+                                                >
+                                                    No orders found.
+                                                </td>
+                                            </tr>
                                         )}
                                     </tbody>
                                 </table>
@@ -1242,12 +1120,9 @@ export default function AdminDashboard({
                         <div
                             style={{
                                 display: 'flex',
-                                justifyContent:
-                                    'space-between',
-                                alignItems:
-                                    'center',
-                                marginBottom:
-                                    '20px',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: '20px',
                                 flexWrap: 'wrap',
                                 gap: '12px'
                             }}
@@ -1255,434 +1130,370 @@ export default function AdminDashboard({
                             <div>
                                 <h2
                                     style={{
-                                        fontSize:
-                                            '1.3rem',
-                                        color:
-                                            'var(--brand)'
+                                        fontSize: '1.3rem',
+                                        color: 'var(--brand)',
+                                        marginBottom: '6px'
                                     }}
                                 >
-                                    📦 My Product
-                                    Catalog (
-                                    {
-                                        uniqueProducts.length
-                                    }
-                                    )
+                                    📦 My Product Catalog ({uniqueProducts.length})
                                 </h2>
 
                                 <p
                                     style={{
-                                        color:
-                                            'var(--mute)',
-                                        fontSize:
-                                            '0.85rem'
+                                        color: 'var(--mute)',
+                                        fontSize: '0.85rem',
+                                        margin: 0
                                     }}
                                 >
-                                    Manage existing
-                                    products and
-                                    admin-added
-                                    products.
+                                    Manage products, stock quantities and admin-added items.
                                 </p>
                             </div>
 
                             <button
-                                onClick={() =>
-                                    setActiveTab(
-                                        'addProduct'
-                                    )
-                                }
-                                style={tabBtnStyle(
-                                    false
-                                )}
+                                type="button"
+                                onClick={() => setActiveTab('addProduct')}
+                                style={tabBtnStyle(false)}
                             >
                                 <Plus size={16} />
                                 Add New
                             </button>
                         </div>
 
-                        {/* PRODUCT GRID */}
-
                         <div
                             style={{
                                 display: 'grid',
-                                gridTemplateColumns:
-                                    'repeat(auto-fill,minmax(280px,1fr))',
+                                gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))',
                                 gap: '16px'
                             }}
                         >
-                            {uniqueProducts.map(
-                                product => {
-                                    const productKey =
-                                        product._id ||
-                                        product.id;
+                            {uniqueProducts.map(product => {
+                                const productId = getProductId(product);
+                                const productKey = String(productId ?? '');
+                                const currentStock = Number(product.stock ?? 0);
+                                const draftStock = stockValues[productKey] ?? String(currentStock);
+                                const isUpdating = Boolean(updatingStock[productKey]);
 
-                                    return (
+                                return (
+                                    <div
+                                        key={productKey || `${product.n}-${product.p}`}
+                                        style={{
+                                            background: 'var(--card)',
+                                            border: '1px solid var(--line)',
+                                            borderRadius: 'var(--radius-md)',
+                                            overflow: 'hidden'
+                                        }}
+                                    >
+                                        {/* IMAGE */}
+
                                         <div
-                                            key={String(
-                                                productKey
-                                            )}
                                             style={{
-                                                background:
-                                                    'var(--card)',
-                                                border:
-                                                    '1px solid var(--line)',
-                                                borderRadius:
-                                                    'var(--radius-md)',
-                                                overflow:
-                                                    'hidden'
+                                                height: '180px',
+                                                background: product.bg || '#28050b',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                overflow: 'hidden',
+                                                position: 'relative'
                                             }}
                                         >
-                                            {/* IMAGE */}
+                                            {product.image ? (
+                                                <img
+                                                    src={product.image}
+                                                    alt={product.n || 'Product'}
+                                                    style={{
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        objectFit: 'cover'
+                                                    }}
+                                                />
+                                            ) : (
+                                                <ImageIcon
+                                                    size={48}
+                                                    color="var(--mute)"
+                                                />
+                                            )}
 
                                             <div
                                                 style={{
-                                                    height:
-                                                        '180px',
-                                                    background:
-                                                        product.bg ||
-                                                        '#28050b',
-                                                    display:
-                                                        'flex',
-                                                    alignItems:
-                                                        'center',
-                                                    justifyContent:
-                                                        'center',
-                                                    overflow:
-                                                        'hidden',
-                                                    position:
-                                                        'relative'
+                                                    position: 'absolute',
+                                                    top: '8px',
+                                                    left: '8px',
+                                                    display: 'flex',
+                                                    gap: '5px',
+                                                    flexWrap: 'wrap'
                                                 }}
                                             >
-                                                {product.image ? (
-                                                    <img
-                                                        src={
-                                                            product.image
-                                                        }
-                                                        alt={
-                                                            product.n
-                                                        }
+                                                {product.t && (
+                                                    <span
                                                         style={{
-                                                            width:
-                                                                '100%',
-                                                            height:
-                                                                '100%',
-                                                            objectFit:
-                                                                'cover'
-                                                        }}
-                                                    />
-                                                ) : (
-                                                    <ImageIcon
-                                                        size={
-                                                            48
-                                                        }
-                                                        color="var(--mute)"
-                                                    />
-                                                )}
-
-                                                <div
-                                                    style={{
-                                                        position:
-                                                            'absolute',
-                                                        top:
-                                                            '8px',
-                                                        left:
-                                                            '8px',
-                                                        display:
-                                                            'flex',
-                                                        gap:
-                                                            '5px',
-                                                        flexWrap:
-                                                            'wrap'
-                                                    }}
-                                                >
-                                                    {product.t && (
-                                                        <span
-                                                            style={{
-                                                                background:
-                                                                    product.t ===
-                                                                    'Sale'
-                                                                        ? 'var(--accent)'
-                                                                        : 'var(--brand)',
-                                                                color:
-                                                                    '#fff',
-                                                                padding:
-                                                                    '3px 8px',
-                                                                borderRadius:
-                                                                    '999px',
-                                                                fontSize:
-                                                                    '0.7rem',
-                                                                fontWeight:
-                                                                    800
-                                                            }}
-                                                        >
-                                                            {
-                                                                product.t
-                                                            }
-                                                        </span>
-                                                    )}
-
-                                                    {product.isCustom && (
-                                                        <span
-                                                            style={{
-                                                                background:
-                                                                    '#25d366',
-                                                                color:
-                                                                    '#fff',
-                                                                padding:
-                                                                    '3px 8px',
-                                                                borderRadius:
-                                                                    '999px',
-                                                                fontSize:
-                                                                    '0.7rem',
-                                                                fontWeight:
-                                                                    800
-                                                            }}
-                                                        >
-                                                            ADMIN
-                                                        </span>
-                                                    )}
-
-                                                    {product.isBuiltIn && (
-                                                        <span
-                                                            style={{
-                                                                background:
-                                                                    '#2563eb',
-                                                                color:
-                                                                    '#fff',
-                                                                padding:
-                                                                    '3px 8px',
-                                                                borderRadius:
-                                                                    '999px',
-                                                                fontSize:
-                                                                    '0.7rem',
-                                                                fontWeight:
-                                                                    800
-                                                            }}
-                                                        >
-                                                            STORE
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            {/* INFO */}
-
-                                            <div
-                                                style={{
-                                                    padding:
-                                                        '14px 16px'
-                                                }}
-                                            >
-                                                <div
-                                                    style={{
-                                                        display:
-                                                            'flex',
-                                                        justifyContent:
-                                                            'space-between',
-                                                        gap:
-                                                            '10px'
-                                                    }}
-                                                >
-                                                    <div>
-                                                        <h3
-                                                            style={{
-                                                                fontSize:
-                                                                    '1rem',
-                                                                fontWeight:
-                                                                    800,
-                                                                margin:
-                                                                    '0 0 3px'
-                                                            }}
-                                                        >
-                                                            {
-                                                                product.n
-                                                            }
-                                                        </h3>
-
-                                                        <span
-                                                            style={{
-                                                                fontSize:
-                                                                    '0.8rem',
-                                                                color:
-                                                                    'var(--mute)'
-                                                            }}
-                                                        >
-                                                            {
-                                                                product.c
-                                                            }{' '}
-                                                            •{' '}
-                                                            {
-                                                                product.a
-                                                            }
-                                                        </span>
-                                                    </div>
-
-                                                    <div
-                                                        style={{
-                                                            textAlign:
-                                                                'right'
+                                                            background: product.t === 'Sale'
+                                                                ? 'var(--accent)'
+                                                                : 'var(--brand)',
+                                                            color: '#fff',
+                                                            padding: '3px 8px',
+                                                            borderRadius: '999px',
+                                                            fontSize: '0.7rem',
+                                                            fontWeight: 800
                                                         }}
                                                     >
-                                                        <div
-                                                            style={{
-                                                                fontWeight:
-                                                                    800,
-                                                                color:
-                                                                    'var(--brand)'
-                                                            }}
-                                                        >
-                                                            ₹
-                                                            {
-                                                                product.p
-                                                            }
-                                                        </div>
+                                                        {product.t}
+                                                    </span>
+                                                )}
 
-                                                        {product.o && (
-                                                            <s
-                                                                style={{
-                                                                    fontSize:
-                                                                        '0.78rem',
-                                                                    color:
-                                                                        'var(--mute)'
-                                                                }}
-                                                            >
-                                                                ₹
-                                                                {
-                                                                    product.o
-                                                                }
-                                                            </s>
-                                                        )}
-                                                    </div>
+                                                {product.isCustom && (
+                                                    <span
+                                                        style={{
+                                                            background: '#16803d',
+                                                            color: '#fff',
+                                                            padding: '3px 8px',
+                                                            borderRadius: '999px',
+                                                            fontSize: '0.7rem',
+                                                            fontWeight: 800
+                                                        }}
+                                                    >
+                                                        ADMIN
+                                                    </span>
+                                                )}
+
+                                                {product.isBuiltIn && (
+                                                    <span
+                                                        style={{
+                                                            background: '#2563eb',
+                                                            color: '#fff',
+                                                            padding: '3px 8px',
+                                                            borderRadius: '999px',
+                                                            fontSize: '0.7rem',
+                                                            fontWeight: 800
+                                                        }}
+                                                    >
+                                                        STORE
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* PRODUCT INFO */}
+
+                                        <div style={{ padding: '14px 16px' }}>
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    gap: '10px'
+                                                }}
+                                            >
+                                                <div>
+                                                    <h3
+                                                        style={{
+                                                            fontSize: '1rem',
+                                                            fontWeight: 800,
+                                                            margin: '0 0 3px'
+                                                        }}
+                                                    >
+                                                        {product.n || 'Unnamed Product'}
+                                                    </h3>
+
+                                                    <span
+                                                        style={{
+                                                            fontSize: '0.8rem',
+                                                            color: 'var(--mute)'
+                                                        }}
+                                                    >
+                                                        {product.c || 'Uncategorized'} • {product.a || 'All Ages'}
+                                                    </span>
                                                 </div>
 
-                                                {/* SIZES */}
+                                                <div style={{ textAlign: 'right' }}>
+                                                    <div
+                                                        style={{
+                                                            fontWeight: 800,
+                                                            color: 'var(--brand)'
+                                                        }}
+                                                    >
+                                                        {money(product.p)}
+                                                    </div>
+
+                                                    {product.o != null && product.o !== '' && (
+                                                        <s
+                                                            style={{
+                                                                fontSize: '0.78rem',
+                                                                color: 'var(--mute)'
+                                                            }}
+                                                        >
+                                                            {money(product.o)}
+                                                        </s>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* STOCK MANAGEMENT */}
+
+                                            <div
+                                                style={{
+                                                    marginTop: '14px',
+                                                    padding: '12px',
+                                                    border: '1px solid var(--line)',
+                                                    borderRadius: '10px',
+                                                    background: 'var(--bg)'
+                                                }}
+                                            >
+                                                <label
+                                                    htmlFor={`stock-${productKey}`}
+                                                    style={{
+                                                        display: 'block',
+                                                        fontSize: '0.82rem',
+                                                        fontWeight: 800,
+                                                        marginBottom: '8px'
+                                                    }}
+                                                >
+                                                    Available Stock
+                                                </label>
 
                                                 <div
                                                     style={{
-                                                        display:
-                                                            'flex',
-                                                        gap:
-                                                            '5px',
-                                                        flexWrap:
-                                                            'wrap',
-                                                        marginTop:
-                                                            '10px'
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '8px'
                                                     }}
                                                 >
-                                                    {product.sizes
-                                                        ?.slice(
-                                                            0,
-                                                            5
-                                                        )
-                                                        .map(
-                                                            (
-                                                                size,
-                                                                index
-                                                            ) => (
-                                                                <span
-                                                                    key={
-                                                                        index
-                                                                    }
-                                                                    style={{
-                                                                        padding:
-                                                                            '3px 8px',
-                                                                        background:
-                                                                            'var(--bg)',
-                                                                        border:
-                                                                            '1px solid var(--line)',
-                                                                        borderRadius:
-                                                                            '6px',
-                                                                        fontSize:
-                                                                            '0.72rem',
-                                                                        fontWeight:
-                                                                            700
-                                                                    }}
-                                                                >
-                                                                    {
-                                                                        size
-                                                                    }
-                                                                </span>
-                                                            )
-                                                        )}
-                                                </div>
-
-                                                {/* DELETE */}
-
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        handleDeleteProduct(
-                                                            product
-                                                        )
-                                                    }
-                                                    style={{
-                                                        marginTop:
-                                                            '12px',
-                                                        width:
-                                                            '100%',
-                                                        padding:
-                                                            '9px',
-                                                        borderRadius:
-                                                            '8px',
-                                                        border:
-                                                            '1px solid #f43f5e',
-                                                        background:
-                                                            'rgba(244,63,94,0.1)',
-                                                        color:
-                                                            '#f43f5e',
-                                                        fontWeight:
-                                                            800,
-                                                        cursor:
-                                                            'pointer',
-                                                        display:
-                                                            'flex',
-                                                        alignItems:
-                                                            'center',
-                                                        justifyContent:
-                                                            'center',
-                                                        gap:
-                                                            '6px'
-                                                    }}
-                                                >
-                                                    <Trash2
-                                                        size={
-                                                            14
+                                                    <input
+                                                        id={`stock-${productKey}`}
+                                                        type="number"
+                                                        min="0"
+                                                        step="1"
+                                                        value={draftStock}
+                                                        disabled={isUpdating}
+                                                        onChange={e =>
+                                                            setStockValues(prev => ({
+                                                                ...prev,
+                                                                [productKey]: e.target.value
+                                                            }))
                                                         }
+                                                        style={{
+                                                            ...inputStyle,
+                                                            minWidth: 0,
+                                                            padding: '9px 10px'
+                                                        }}
                                                     />
 
-                                                    Delete Product
-                                                </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={isUpdating}
+                                                        onClick={() => handleUpdateStock(product)}
+                                                        style={{
+                                                            flexShrink: 0,
+                                                            padding: '9px 12px',
+                                                            borderRadius: '8px',
+                                                            border: 'none',
+                                                            background: isUpdating ? '#6b7280' : 'var(--brand)',
+                                                            color: 'var(--brand-ink)',
+                                                            fontWeight: 800,
+                                                            cursor: isUpdating ? 'wait' : 'pointer',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px'
+                                                        }}
+                                                    >
+                                                        {isUpdating ? (
+                                                            <>
+                                                                <RefreshCw size={14} />
+                                                                Saving
+                                                            </>
+                                                        ) : (
+                                                            'Update Stock'
+                                                        )}
+                                                    </button>
+                                                </div>
+
+                                                <small
+                                                    style={{
+                                                        display: 'block',
+                                                        marginTop: '7px',
+                                                        color: 'var(--mute)'
+                                                    }}
+                                                >
+                                                    Current stock: {currentStock}
+                                                    {currentStock === 0 && (
+                                                        <span style={{ color: '#ef4444', fontWeight: 800 }}>
+                                                            {' '}• Out of stock
+                                                        </span>
+                                                    )}
+                                                </small>
                                             </div>
+
+                                            {/* SIZES */}
+
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    gap: '5px',
+                                                    flexWrap: 'wrap',
+                                                    marginTop: '10px'
+                                                }}
+                                            >
+                                                {(product.sizes || [])
+                                                    .slice(0, 5)
+                                                    .map((size, index) => (
+                                                        <span
+                                                            key={`${size}-${index}`}
+                                                            style={{
+                                                                padding: '3px 8px',
+                                                                background: 'var(--bg)',
+                                                                border: '1px solid var(--line)',
+                                                                borderRadius: '6px',
+                                                                fontSize: '0.72rem',
+                                                                fontWeight: 700
+                                                            }}
+                                                        >
+                                                            {size}
+                                                        </span>
+                                                    ))}
+                                            </div>
+
+                                            {/* DELETE */}
+
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteProduct(product)}
+                                                style={{
+                                                    marginTop: '12px',
+                                                    width: '100%',
+                                                    padding: '9px',
+                                                    borderRadius: '8px',
+                                                    border: '1px solid #f43f5e',
+                                                    background: 'rgba(244,63,94,0.1)',
+                                                    color: '#f43f5e',
+                                                    fontWeight: 800,
+                                                    cursor: 'pointer',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    gap: '6px'
+                                                }}
+                                            >
+                                                <Trash2 size={14} />
+                                                Delete Product
+                                            </button>
                                         </div>
-                                    );
-                                }
-                            )}
+                                    </div>
+                                );
+                            })}
                         </div>
 
-                        {uniqueProducts.length ===
-                            0 && (
+                        {uniqueProducts.length === 0 && (
                             <div
                                 style={{
-                                    textAlign:
-                                        'center',
-                                    padding:
-                                        '60px 20px',
-                                    color:
-                                        'var(--mute)'
+                                    textAlign: 'center',
+                                    padding: '60px 20px',
+                                    color: 'var(--mute)'
                                 }}
                             >
-                                <Package
-                                    size={48}
-                                    style={{
-                                        opacity: 0.3
-                                    }}
-                                />
+                                <Package size={48} style={{ opacity: 0.3 }} />
 
                                 <p
                                     style={{
-                                        fontSize:
-                                            '1.1rem',
-                                        fontWeight:
-                                            700
+                                        fontSize: '1.1rem',
+                                        fontWeight: 700
                                     }}
                                 >
                                     No products yet
@@ -1705,12 +1516,9 @@ export default function AdminDashboard({
                     >
                         <h2
                             style={{
-                                fontSize:
-                                    '1.4rem',
-                                color:
-                                    'var(--brand)',
-                                marginBottom:
-                                    '6px'
+                                fontSize: '1.4rem',
+                                color: 'var(--brand)',
+                                marginBottom: '6px'
                             }}
                         >
                             ➕ Add New Product
@@ -1718,427 +1526,283 @@ export default function AdminDashboard({
 
                         <p
                             style={{
-                                color:
-                                    'var(--mute)',
-                                marginBottom:
-                                    '24px'
+                                color: 'var(--mute)',
+                                marginBottom: '24px'
                             }}
                         >
-                            Add product photo,
-                            pricing, sizes and
-                            details.
+                            Add product photo, pricing, stock, sizes and details.
                         </p>
 
                         {addSuccess && (
                             <div
                                 style={{
-                                    background:
-                                        'rgba(34,197,94,0.15)',
-                                    border:
-                                        '1px solid #22c55e',
-                                    color:
-                                        '#22c55e',
-                                    padding:
-                                        '12px 18px',
-                                    borderRadius:
-                                        '10px',
-                                    marginBottom:
-                                        '20px',
+                                    background: 'rgba(34,197,94,0.15)',
+                                    border: '1px solid #22c55e',
+                                    color: '#22c55e',
+                                    padding: '12px 18px',
+                                    borderRadius: '10px',
+                                    marginBottom: '20px',
                                     fontWeight: 800
                                 }}
                             >
                                 <CheckCircle2
                                     size={18}
                                     style={{
-                                        verticalAlign:
-                                            'middle',
-                                        marginRight:
-                                            '6px'
+                                        verticalAlign: 'middle',
+                                        marginRight: '6px'
                                     }}
                                 />
-                                Product added
-                                successfully! 🎉
+                                Product added successfully! 🎉
                             </div>
                         )}
 
                         <form
-                            onSubmit={
-                                handleAddNewProduct
-                            }
+                            onSubmit={handleAddNewProduct}
                             style={{
-                                background:
-                                    'var(--card)',
-                                border:
-                                    '1px solid var(--line)',
-                                borderRadius:
-                                    'var(--radius-lg)',
+                                background: 'var(--card)',
+                                border: '1px solid var(--line)',
+                                borderRadius: 'var(--radius-lg)',
                                 padding: '28px',
-                                display:
-                                    'flex',
-                                flexDirection:
-                                    'column',
+                                display: 'flex',
+                                flexDirection: 'column',
                                 gap: '18px'
                             }}
                         >
                             {/* IMAGE */}
 
                             <div>
-                                <label
-                                    style={
-                                        labelStyle
-                                    }
-                                >
+                                <label style={labelStyle}>
                                     📷 Product Photo
                                 </label>
 
                                 <div
-                                    onClick={() =>
-                                        fileInputRef.current?.click()
-                                    }
+                                    onClick={() => fileInputRef.current?.click()}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            fileInputRef.current?.click();
+                                        }
+                                    }}
                                     style={{
-                                        height:
-                                            '220px',
-                                        border:
-                                            '2px dashed var(--brand)',
-                                        borderRadius:
-                                            '12px',
-                                        display:
-                                            'flex',
-                                        alignItems:
-                                            'center',
-                                        justifyContent:
-                                            'center',
-                                        flexDirection:
-                                            'column',
-                                        cursor:
-                                            'pointer',
-                                        overflow:
-                                            'hidden'
+                                        height: '220px',
+                                        border: '2px dashed var(--brand)',
+                                        borderRadius: '12px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        flexDirection: 'column',
+                                        cursor: 'pointer',
+                                        overflow: 'hidden'
                                     }}
                                 >
                                     {imagePreview ? (
                                         <img
-                                            src={
-                                                imagePreview
-                                            }
-                                            alt="Preview"
+                                            src={imagePreview}
+                                            alt="Product preview"
                                             style={{
-                                                width:
-                                                    '100%',
-                                                height:
-                                                    '100%',
-                                                objectFit:
-                                                    'cover'
+                                                width: '100%',
+                                                height: '100%',
+                                                objectFit: 'cover'
                                             }}
                                         />
                                     ) : (
                                         <>
-                                            <Upload
-                                                size={
-                                                    36
-                                                }
-                                                color="var(--brand)"
-                                            />
-
-                                            <strong>
-                                                Click to
-                                                Upload
-                                            </strong>
-
-                                            <small
-                                                style={{
-                                                    color:
-                                                        'var(--mute)'
-                                                }}
-                                            >
-                                                JPG, PNG,
-                                                WebP
+                                            <Upload size={36} color="var(--brand)" />
+                                            <strong>Click to Upload</strong>
+                                            <small style={{ color: 'var(--mute)' }}>
+                                                JPG, PNG, WebP — max 5MB
                                             </small>
                                         </>
                                     )}
                                 </div>
 
                                 <input
-                                    ref={
-                                        fileInputRef
-                                    }
+                                    ref={fileInputRef}
                                     type="file"
                                     accept="image/*"
-                                    onChange={
-                                        handleImageUpload
-                                    }
-                                    style={{
-                                        display:
-                                            'none'
-                                    }}
+                                    onChange={handleImageUpload}
+                                    style={{ display: 'none' }}
                                 />
                             </div>
 
                             {/* NAME */}
 
                             <div>
-                                <label
-                                    style={
-                                        labelStyle
-                                    }
-                                >
+                                <label style={labelStyle}>
                                     Product Name *
                                 </label>
 
                                 <input
                                     required
-                                    value={
-                                        newProduct.n
-                                    }
+                                    value={newProduct.n}
                                     onChange={e =>
-                                        setNewProduct(
-                                            prev => ({
-                                                ...prev,
-                                                n: e.target
-                                                    .value
-                                            })
-                                        )
+                                        setNewProduct(prev => ({
+                                            ...prev,
+                                            n: e.target.value
+                                        }))
                                     }
                                     placeholder="Premium Cotton Kurta"
-                                    style={
-                                        inputStyle
-                                    }
+                                    style={inputStyle}
                                 />
                             </div>
 
-                            {/* STOCK QUANTITY */}
+                            {/* STOCK */}
+
                             <div>
-                                <label style={labelStyle}>Available Stock *</label>
+                                <label style={labelStyle}>
+                                    Available Stock *
+                                </label>
+
                                 <input
                                     type="number"
                                     min="0"
+                                    step="1"
                                     required
-                                    value={newProduct.stock ?? 0}
-                                    onChange={e => setNewProduct(prev => ({ ...prev, stock: Math.max(0, Number(e.target.value)) }))}
+                                    value={newProduct.stock}
+                                    onChange={e =>
+                                        setNewProduct(prev => ({
+                                            ...prev,
+                                            stock: e.target.value
+                                        }))
+                                    }
                                     placeholder="e.g. 25"
                                     style={inputStyle}
                                 />
-                                <small style={{color:'#9ca3af'}}>Customers will see the available quantity on product cards.</small>
+
+                                <small style={{ color: 'var(--mute)' }}>
+                                    Set the starting stock quantity for this product.
+                                </small>
                             </div>
 
-                            {/* CATEGORY */}
+                            {/* CATEGORY AND AGE */}
 
                             <div
                                 style={{
-                                    display:
-                                        'grid',
-                                    gridTemplateColumns:
-                                        '1fr 1fr',
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))',
                                     gap: '14px'
                                 }}
                             >
                                 <div>
-                                    <label
-                                        style={
-                                            labelStyle
-                                        }
-                                    >
+                                    <label style={labelStyle}>
                                         Category
                                     </label>
 
                                     <select
-                                        value={
-                                            newProduct.c
-                                        }
+                                        value={newProduct.c}
                                         onChange={e =>
-                                            setNewProduct(
-                                                prev => ({
-                                                    ...prev,
-                                                    c: e.target
-                                                        .value
-                                                })
-                                            )
+                                            setNewProduct(prev => ({
+                                                ...prev,
+                                                c: e.target.value
+                                            }))
                                         }
-                                        style={
-                                            inputStyle
-                                        }
+                                        style={inputStyle}
                                     >
-                                        <option>
-                                            Boys
-                                        </option>
-                                        <option>
-                                            Girls
-                                        </option>
-                                        <option>
-                                            Infants
-                                        </option>
-                                        <option>
-                                            Unisex
-                                        </option>
-                                        <option>
-                                             Men
-                                        </option>
-                                        <option>
-                                            Women
-                                        </option>
+                                        <option>Boys</option>
+                                        <option>Girls</option>
+                                        <option>Infants</option>
+                                        <option>Unisex</option>
+                                        <option>Men</option>
+                                        <option>Women</option>
                                     </select>
                                 </div>
 
                                 <div>
-                                    <label
-                                        style={
-                                            labelStyle
-                                        }
-                                    >
+                                    <label style={labelStyle}>
                                         Age Range
                                     </label>
 
                                     <select
-                                        value={
-                                            newProduct.a
-                                        }
+                                        value={newProduct.a}
                                         onChange={e =>
-                                            setNewProduct(
-                                                prev => ({
-                                                    ...prev,
-                                                    a: e.target
-                                                        .value
-                                                })
-                                            )
+                                            setNewProduct(prev => ({
+                                                ...prev,
+                                                a: e.target.value
+                                            }))
                                         }
-                                        style={
-                                            inputStyle
-                                        }
+                                        style={inputStyle}
                                     >
-                                        <option>
-                                            0–6 mo
-                                        </option>
-                                        <option>
-                                            0–2 yrs
-                                        </option>
-                                        <option>
-                                            1–7 yrs
-                                        </option>
-                                        <option>
-                                            2–8 yrs
-                                        </option>
-                                        <option>
-                                            2–10 yrs
-                                        </option>
-                                        <option>
-                                            All Ages
-                                        </option>
+                                        <option>0–6 mo</option>
+                                        <option>0–2 yrs</option>
+                                        <option>1–7 yrs</option>
+                                        <option>2–8 yrs</option>
+                                        <option>2–10 yrs</option>
+                                        <option>All Ages</option>
                                     </select>
                                 </div>
                             </div>
 
-                            {/* PRICE */}
+                            {/* PRICES AND TAG */}
 
                             <div
                                 style={{
-                                    display:
-                                        'grid',
-                                    gridTemplateColumns:
-                                        '1fr 1fr 1fr',
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))',
                                     gap: '14px'
                                 }}
                             >
                                 <div>
-                                    <label
-                                        style={
-                                            labelStyle
-                                        }
-                                    >
+                                    <label style={labelStyle}>
                                         Selling Price *
                                     </label>
 
                                     <input
                                         type="number"
                                         min="1"
+                                        step="0.01"
                                         required
-                                        value={
-                                            newProduct.p
-                                        }
+                                        value={newProduct.p}
                                         onChange={e =>
-                                            setNewProduct(
-                                                prev => ({
-                                                    ...prev,
-                                                    p: e.target
-                                                        .value
-                                                })
-                                            )
+                                            setNewProduct(prev => ({
+                                                ...prev,
+                                                p: e.target.value
+                                            }))
                                         }
-                                        style={
-                                            inputStyle
-                                        }
+                                        style={inputStyle}
                                     />
                                 </div>
 
                                 <div>
-                                    <label
-                                        style={
-                                            labelStyle
-                                        }
-                                    >
+                                    <label style={labelStyle}>
                                         MRP
                                     </label>
 
                                     <input
                                         type="number"
-                                        value={
-                                            newProduct.o
-                                        }
+                                        min="0"
+                                        step="0.01"
+                                        value={newProduct.o}
                                         onChange={e =>
-                                            setNewProduct(
-                                                prev => ({
-                                                    ...prev,
-                                                    o: e.target
-                                                        .value
-                                                })
-                                            )
+                                            setNewProduct(prev => ({
+                                                ...prev,
+                                                o: e.target.value
+                                            }))
                                         }
-                                        style={
-                                            inputStyle
-                                        }
+                                        style={inputStyle}
                                     />
                                 </div>
 
                                 <div>
-                                    <label
-                                        style={
-                                            labelStyle
-                                        }
-                                    >
+                                    <label style={labelStyle}>
                                         Tag
                                     </label>
 
                                     <select
-                                        value={
-                                            newProduct.t
-                                        }
+                                        value={newProduct.t}
                                         onChange={e =>
-                                            setNewProduct(
-                                                prev => ({
-                                                    ...prev,
-                                                    t: e.target
-                                                        .value
-                                                })
-                                            )
+                                            setNewProduct(prev => ({
+                                                ...prev,
+                                                t: e.target.value
+                                            }))
                                         }
-                                        style={
-                                            inputStyle
-                                        }
+                                        style={inputStyle}
                                     >
-                                        <option>
-                                            New
-                                        </option>
-                                        <option>
-                                            Sale
-                                        </option>
-                                        <option>
-                                            Bestseller
-                                        </option>
-                                        <option>
-                                            Trending
-                                        </option>
-                                        <option>
-                                            Popular
-                                        </option>
+                                        <option>New</option>
+                                        <option>Sale</option>
+                                        <option>Bestseller</option>
+                                        <option>Trending</option>
+                                        <option>Popular</option>
                                     </select>
                                 </div>
                             </div>
@@ -2146,126 +1810,82 @@ export default function AdminDashboard({
                             {/* FABRIC */}
 
                             <div>
-                                <label
-                                    style={
-                                        labelStyle
-                                    }
-                                >
+                                <label style={labelStyle}>
                                     Fabric
                                 </label>
 
                                 <input
-                                    value={
-                                        newProduct.fabric
-                                    }
+                                    value={newProduct.fabric}
                                     onChange={e =>
-                                        setNewProduct(
-                                            prev => ({
-                                                ...prev,
-                                                fabric: e.target
-                                                    .value
-                                            })
-                                        )
+                                        setNewProduct(prev => ({
+                                            ...prev,
+                                            fabric: e.target.value
+                                        }))
                                     }
                                     placeholder="100% Cotton"
-                                    style={
-                                        inputStyle
-                                    }
+                                    style={inputStyle}
                                 />
                             </div>
 
                             {/* SIZES */}
 
                             <div>
-                                <label
-                                    style={
-                                        labelStyle
-                                    }
-                                >
-                                    Sizes
+                                <label style={labelStyle}>
+                                    Sizes (comma separated)
                                 </label>
 
                                 <input
-                                    value={
-                                        newProduct.sizes
-                                    }
+                                    value={newProduct.sizes}
                                     onChange={e =>
-                                        setNewProduct(
-                                            prev => ({
-                                                ...prev,
-                                                sizes: e.target
-                                                    .value
-                                            })
-                                        )
+                                        setNewProduct(prev => ({
+                                            ...prev,
+                                            sizes: e.target.value
+                                        }))
                                     }
                                     placeholder="2-3Y, 4-5Y, 6-7Y"
-                                    style={
-                                        inputStyle
-                                    }
+                                    style={inputStyle}
                                 />
                             </div>
 
                             {/* COLORS */}
 
                             <div>
-                                <label
-                                    style={
-                                        labelStyle
-                                    }
-                                >
-                                    Colors
+                                <label style={labelStyle}>
+                                    Colors (comma separated)
                                 </label>
 
                                 <input
-                                    value={
-                                        newProduct.colors
-                                    }
+                                    value={newProduct.colors}
                                     onChange={e =>
-                                        setNewProduct(
-                                            prev => ({
-                                                ...prev,
-                                                colors: e.target
-                                                    .value
-                                            })
-                                        )
+                                        setNewProduct(prev => ({
+                                            ...prev,
+                                            colors: e.target.value
+                                        }))
                                     }
                                     placeholder="Red, Blue, Pink"
-                                    style={
-                                        inputStyle
-                                    }
+                                    style={inputStyle}
                                 />
                             </div>
 
                             {/* DESCRIPTION */}
 
                             <div>
-                                <label
-                                    style={
-                                        labelStyle
-                                    }
-                                >
+                                <label style={labelStyle}>
                                     Description
                                 </label>
 
                                 <textarea
                                     rows={4}
-                                    value={
-                                        newProduct.description
-                                    }
+                                    value={newProduct.description}
                                     onChange={e =>
-                                        setNewProduct(
-                                            prev => ({
-                                                ...prev,
-                                                description:
-                                                    e.target
-                                                        .value
-                                            })
-                                        )
+                                        setNewProduct(prev => ({
+                                            ...prev,
+                                            description: e.target.value
+                                        }))
                                     }
                                     style={{
                                         ...inputStyle,
-                                        resize:
-                                            'vertical'
+                                        resize: 'vertical'
                                     }}
                                 />
                             </div>
@@ -2273,22 +1893,21 @@ export default function AdminDashboard({
                             <button
                                 type="submit"
                                 className="btn-primary"
+                                disabled={newProductLoading}
                                 style={{
                                     width: '100%',
                                     padding: '14px',
-                                    fontSize:
-                                        '1rem',
-                                    display:
-                                        'flex',
-                                    alignItems:
-                                        'center',
-                                    justifyContent:
-                                        'center',
-                                    gap: '8px'
+                                    fontSize: '1rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '8px',
+                                    opacity: newProductLoading ? 0.7 : 1,
+                                    cursor: newProductLoading ? 'wait' : 'pointer'
                                 }}
                             >
                                 <Plus size={20} />
-                                Add Product to Store
+                                {newProductLoading ? 'Adding Product...' : 'Add Product to Store'}
                             </button>
                         </form>
                     </div>
