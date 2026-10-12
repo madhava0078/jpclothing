@@ -117,34 +117,35 @@ export const api = {
     }),
 
   // -------------------------
-  // UPDATE PRODUCT STOCK
-  // -------------------------
+// UPDATE PRODUCT STOCK
+// -------------------------
 
-  updateProductStock: (id, stock, source = 'custom') => {
-    const numericStock = Number(stock);
+updateProductStock: (id, stock, source) => {
+  const numericStock = Number(stock);
 
-    if (
-      stock === '' ||
-      !Number.isInteger(numericStock) ||
-      numericStock < 0
-    ) {
-      throw new Error(
-        'Stock must be a non-negative whole number.'
-      );
-    }
-
-    return request(
-      `/products/${encodeURIComponent(id)}/stock`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          stock: numericStock,
-          source
-        })
-      }
+  if (
+    stock === '' ||
+    !Number.isInteger(numericStock) ||
+    numericStock < 0
+  ) {
+    throw new Error(
+      'Stock must be a non-negative whole number.'
     );
-  },
+  }
 
+  const productSource = source || 'custom';
+
+  return request(
+    `/products/${encodeURIComponent(id)}/stock`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        stock: numericStock,
+        source: productSource
+      })
+    }
+  );
+},
   // -------------------------
   // DELETE PRODUCT
   // -------------------------
