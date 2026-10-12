@@ -346,37 +346,20 @@ app.get('/api/auth/me', auth(), async (req, res) => {
 /* GET PRODUCTS - OPTIMIZED */
 app.get('/api/products', async (_req, res) => {
   try {
-    const [deletedRows, inventoryRows, customProducts] =
-      await Promise.all([
-        DeletedProduct.find()
-          .select('productId -_id')
-          .lean(),
-
-        Inventory.find()
-          .select('productKey stock -_id')
-          .lean(),
-
-        Product.find({
-          source: { $ne: 'builtin' }
-        }).lean()
-      ]);
-
-    const deletedIds = new Set(
-      deletedRows.map(row => String(row.productId))
-    );
+    const [deletedIds, inventoryRows, customProducts] = await Promise.all([
+      getDeletedIds(),
+      Inventory.find().select('productKey stock -_id').lean(),
+      Product.find({ source: { $ne: 'builtin' } }).lean()
+    ]);
 
     const inventoryMap = new Map(
-      inventoryRows.map(row => [
-        String(row.productKey),
-        row.stock
-      ])
+      inventoryRows.map(row => [String(row.productKey), row.stock])
     );
 
     const builtInProducts = STATIC_PRODUCTS
       .filter(product => !deletedIds.has(String(product.id)))
       .map(product => {
         const key = `builtin:${String(product.id)}`;
-
         return {
           ...product,
           legacyId: String(product.id),
@@ -385,21 +368,17 @@ app.get('/api/products', async (_req, res) => {
         };
       });
 
-    res.set('Cache-Control', 'no-store');
-
-    return res.json([
-      ...builtInProducts,
-      ...customProducts
-    ]);
+    return res.json([...builtInProducts, ...customProducts]);
   } catch (error) {
     console.error('GET PRODUCTS ERROR:', error);
-
     return res.status(500).json({
       message: 'Unable to fetch products.',
       error: error.message
     });
   }
-});/* ADD CUSTOM PRODUCT */
+});
+
+/* ADD CUSTOM PRODUCT */
 app.post('/api/products', auth('admin'), async (req, res) => {
   try {
     const data = { ...req.body };
