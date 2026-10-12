@@ -17,10 +17,8 @@ export default function App() {
   const [products, setProducts] = useState([]);
 
   const [error, setError] = useState('');
-
   const [username, setUsername] = useState('jpadmin');
   const [password, setPassword] = useState('');
-
   const [loading, setLoading] = useState(false);
 
   // ==========================================
@@ -29,27 +27,20 @@ export default function App() {
 
   const load = async () => {
     try {
-      const [orderData, productData] =
-        await Promise.all([
-          api.getOrders(),
-          api.getProducts()
-        ]);
+      const [orderData, productData] = await Promise.all([
+        api.getOrders(),
+        api.getProducts()
+      ]);
 
-      setOrders(orderData || []);
-      setProducts(productData || []);
+      setOrders(Array.isArray(orderData) ? orderData : []);
+      setProducts(Array.isArray(productData) ? productData : []);
 
       setError('');
     } catch (e) {
-      console.error(e);
+      console.error('Dashboard loading error:', e);
 
-      clearAdminSession();
-
-      setLoggedIn(false);
-
-      setOrders([]);
-      setProducts([]);
-
-      setError(e.message);
+      // Avoid logging out for temporary network errors.
+      setError(e.message || 'Unable to load dashboard data.');
     }
   };
 
@@ -81,17 +72,19 @@ export default function App() {
 
     try {
       const data = await api.login({
-        username,
+        username: username.trim(),
         password
       });
 
+      if (!data?.token) {
+        throw new Error('Login response did not contain a token.');
+      }
+
       setAdminSession(data);
-
       setLoggedIn(true);
-
       setPassword('');
     } catch (e) {
-      setError(e.message);
+      setError(e.message || 'Login failed.');
     } finally {
       setLoading(false);
     }
@@ -103,18 +96,19 @@ export default function App() {
 
   const updateStatus = async (id, status) => {
     try {
-      const updated = await api.updateStatus(
-        id,
-        status
-      );
+      const updated = await api.updateStatus(id, status);
 
       setOrders((prev) =>
-        prev.map((o) =>
-          o.id === id ? updated : o
+        prev.map((order) =>
+          String(order.id || order._id) === String(id)
+            ? { ...order, ...updated }
+            : order
         )
       );
+
+      await load();
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Unable to update order status.');
     }
   };
 
@@ -123,7 +117,9 @@ export default function App() {
   // ==========================================
 
   const deleteOrder = async (id) => {
-    const order = orders.find((o) => o.id === id);
+    const order = orders.find(
+      (item) => String(item.id || item._id) === String(id)
+    );
 
     if (!order) {
       alert('Order not found.');
@@ -131,7 +127,9 @@ export default function App() {
     }
 
     const confirmed = window.confirm(
-      `Delete order "${order.id}" permanently?\n\nCustomer: ${order.customer?.name || 'Unknown'}\nThis action cannot be undone.`
+      `Delete order "${id}" permanently?\n\n` +
+      `Customer: ${order.customer?.name || 'Unknown'}\n\n` +
+      'This action cannot be undone.'
     );
 
     if (!confirmed) return;
@@ -140,12 +138,15 @@ export default function App() {
       await api.deleteOrder(id);
 
       setOrders((prev) =>
-        prev.filter((o) => o.id !== id)
+        prev.filter(
+          (item) =>
+            String(item.id || item._id) !== String(id)
+        )
       );
 
       alert(`Order ${id} deleted successfully.`);
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Unable to delete order.');
     }
   };
 
@@ -158,13 +159,13 @@ export default function App() {
       await api.markRead();
 
       setOrders((prev) =>
-        prev.map((o) => ({
-          ...o,
+        prev.map((order) => ({
+          ...order,
           isRead: true
         }))
       );
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Unable to mark orders as read.');
     }
   };
 
@@ -178,41 +179,93 @@ export default function App() {
 
       setProducts((prev) => [
         created,
-        ...prev
+        ...prev.filter(
+          (item) =>
+            String(item._id || item.id) !==
+            String(created._id || created.id)
+        )
       ]);
 
       alert('Product added successfully!');
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Unable to add product.');
+      throw e;
     }
   };
 
   // ==========================================
-  // UPDATE PRODUCT
+  // UPDATE PRODUCT DETAILS
   // ==========================================
 
-  const updateProduct = async (
-    id,
-    product
-  ) => {
+  const updateProduct = async (id, product) => {
     try {
-      const updated =
-        await api.updateProduct(
-          id,
-          product
-        );
+      const updated = await api.updateProduct(id, product);
 
       setProducts((prev) =>
-        prev.map((p) =>
-          (p._id || p.id) === id
-            ? updated
-            : p
+        prev.map((item) =>
+          String(item._id || item.id) === String(id)
+            ? { ...item, ...updated }
+            : item
         )
       );
 
       alert('Product updated successfully!');
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Unable to update product.');
+      throw e;
+    }
+  };
+
+  // ==========================================
+  // UPDATE PRODUCT STOCK
+  // ==========================================
+
+  const updateProductStock = async (
+    id,
+    stock,
+    source = 'custom'
+  ) => {
+    const numericStock = Number(stock);
+
+    if (
+      !Number.isInteger(numericStock) ||
+      numericStock < 0
+    ) {
+      alert('Stock must be a non-negative whole number.');
+      throw new Error('Invalid stock quantity.');
+    }
+
+    try {
+      const updated = await api.updateProductStock(
+        id,
+        numericStock,
+        source
+      );
+
+      setProducts((prev) =>
+        prev.map((product) => {
+          const productId =
+            product._id ??
+            product.id ??
+            product.legacyId;
+
+          return String(productId) === String(id)
+            ? {
+                ...product,
+                ...updated,
+                stock: updated?.stock ?? numericStock
+              }
+            : product;
+        })
+      );
+
+      // Refresh the dashboard with the server's latest data.
+      await load();
+
+      alert('Product stock updated successfully!');
+    } catch (e) {
+      alert(e.message || 'Unable to update product stock.');
+      throw e;
     }
   };
 
@@ -225,15 +278,19 @@ export default function App() {
       await api.deleteProduct(id, type);
 
       setProducts((prev) =>
-        prev.filter(
-          (p) =>
-            (p._id || p.id) !== id
-        )
+        prev.filter((product) => {
+          const productId =
+            product._id ??
+            product.id ??
+            product.legacyId;
+
+          return String(productId) !== String(id);
+        })
       );
 
       alert('Product deleted successfully!');
     } catch (e) {
-      alert(e.message);
+      alert(e.message || 'Unable to delete product.');
       throw e;
     }
   };
@@ -246,11 +303,10 @@ export default function App() {
     clearAdminSession();
 
     setLoggedIn(false);
-
     setOrders([]);
     setProducts([]);
-
     setError('');
+    setPassword('');
   };
 
   // ==========================================
@@ -264,7 +320,8 @@ export default function App() {
           minHeight: '100vh',
           display: 'grid',
           placeItems: 'center',
-          padding: 20
+          padding: 20,
+          boxSizing: 'border-box'
         }}
       >
         <form
@@ -276,7 +333,8 @@ export default function App() {
             border: '1px solid var(--line)',
             borderRadius: 'var(--radius-lg)',
             padding: 30,
-            boxShadow: 'var(--shadow-lg)'
+            boxShadow: 'var(--shadow-lg)',
+            boxSizing: 'border-box'
           }}
         >
           <div
@@ -290,11 +348,7 @@ export default function App() {
             JP CLOTHING
           </div>
 
-          <h1
-            style={{
-              margin: '8px 0 4px'
-            }}
-          >
+          <h1 style={{ margin: '8px 0 4px' }}>
             Admin Panel
           </h1>
 
@@ -308,31 +362,51 @@ export default function App() {
             from the customer website.
           </p>
 
+          <label
+            htmlFor="admin-username"
+            style={labelStyle}
+          >
+            Admin username
+          </label>
+
           <input
+            id="admin-username"
+            type="text"
             value={username}
-            onChange={(e) =>
-              setUsername(e.target.value)
-            }
+            onChange={(e) => setUsername(e.target.value)}
             placeholder="Admin username"
+            autoComplete="username"
+            required
             style={inputStyle}
           />
 
+          <label
+            htmlFor="admin-password"
+            style={{
+              ...labelStyle,
+              marginTop: 14
+            }}
+          >
+            Admin password
+          </label>
+
           <input
+            id="admin-password"
             type="password"
             value={password}
-            onChange={(e) =>
-              setPassword(e.target.value)
-            }
+            onChange={(e) => setPassword(e.target.value)}
             placeholder="Admin password"
+            autoComplete="current-password"
+            required
             style={{
               ...inputStyle,
-              marginTop: 12
+              marginTop: 6
             }}
-            required
           />
 
           {error && (
             <div
+              role="alert"
               style={{
                 color: '#f87171',
                 fontWeight: 700,
@@ -345,11 +419,14 @@ export default function App() {
           )}
 
           <button
+            type="submit"
             className="btn-primary"
             style={{
               width: '100%',
-              marginTop: 16,
-              padding: 12
+              marginTop: 18,
+              padding: 12,
+              cursor: loading ? 'wait' : 'pointer',
+              opacity: loading ? 0.7 : 1
             }}
             disabled={loading}
           >
@@ -370,37 +447,34 @@ export default function App() {
     <AdminDashboard
       orders={orders}
       products={products}
+      error={error}
 
-      onUpdateOrderStatus={
-        updateStatus
-      }
+      onRefresh={load}
 
-      onDeleteOrder={
-        deleteOrder
-      }
+      onUpdateOrderStatus={updateStatus}
+      onDeleteOrder={deleteOrder}
+      onMarkOrdersRead={markRead}
 
-      onMarkOrdersRead={
-        markRead
-      }
+      onLogout={logout}
 
-      onLogout={
-        logout
-      }
-
-      onAddProduct={
-        addProduct
-      }
-
-      onUpdateProduct={
-        updateProduct
-      }
-
-      onDeleteProduct={
-        deleteProduct
-      }
+      onAddProduct={addProduct}
+      onUpdateProduct={updateProduct}
+      onUpdateProductStock={updateProductStock}
+      onDeleteProduct={deleteProduct}
     />
   );
 }
+
+// ==========================================
+// SHARED STYLES
+// ==========================================
+
+const labelStyle = {
+  display: 'block',
+  fontSize: '.85rem',
+  fontWeight: 700,
+  marginBottom: 6
+};
 
 const inputStyle = {
   width: '100%',
@@ -408,5 +482,6 @@ const inputStyle = {
   borderRadius: 8,
   border: '1px solid var(--line)',
   background: 'var(--bg)',
-  color: 'var(--ink)'
+  color: 'var(--ink)',
+  boxSizing: 'border-box'
 };
