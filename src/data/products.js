@@ -192,5 +192,5 @@ export const PRODUCTS = [
     }
 ];
 
-export const CATEGORIES = ["All", "Girls", "Boys", "Infants"];
+export const CATEGORIES = ["All", "Men", "Women", "Girls", "Boys", "Infants"];
 export const AGE_RANGES = ["All Ages", "0–6 mo", "0–2 yrs", "1–7 yrs", "2–8 yrs", "2–10 yrs", "3–10 yrs"];
