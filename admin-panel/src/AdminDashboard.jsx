@@ -1969,6 +1969,12 @@ export default function AdminDashboard({
                                         <option>
                                             Unisex
                                         </option>
+                                        <option>
+                                             Men
+                                        </option>
+                                        <option>
+                                            Women
+                                        </option>
                                     </select>
                                 </div>
 
