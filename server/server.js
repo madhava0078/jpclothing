@@ -40,7 +40,11 @@ const orderSchema = new mongoose.Schema({
     enum: ['Pending', 'Approved', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],
     default: 'Pending'
   },
-  invoiceNumber: { type: String, default: null, unique: true, sparse: true },
+  invoiceNumber: {
+  type: String,
+  default: undefined,
+  trim: true
+},
   isRead: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
