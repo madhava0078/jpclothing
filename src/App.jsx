@@ -1,2342 +1,545 @@
-import React, { useState, useEffect, useCallback } from 'react';
-
-import {
-    api,
-    getAuthToken
-} from './lib/api';
-
-import Header from './components/Header';
-import PromoBanner from './components/PromoBanner';
-import Hero from './components/Hero';
-import FilterTools from './components/FilterTools';
-import ProductCard from './components/ProductCard';
-import ProductDetailModal from './components/ProductDetailModal';
-import CartDrawer from './components/CartDrawer';
-import WishlistDrawer from './components/WishlistDrawer';
-import CheckoutModal from './components/CheckoutModal';
-import AuthModal from './components/AuthModal';
-import UserOrdersModal from './components/UserOrdersModal';
-import Toast from './components/Toast';
-import Footer from './components/Footer';
-
-export default function App() {
-
-    // =========================================================
-    // SHOP STATE
-    // =========================================================
-
-    const [activeCategory, setActiveCategory] = useState('All');
-    const [activeAge, setActiveAge] = useState('All Ages');
-    const [sortOption, setSortOption] = useState('f');
-    const [searchQuery, setSearchQuery] = useState('');
-
-    // =========================================================
-    // USER AUTH
-    // =========================================================
-
-    const [currentUser, setCurrentUser] = useState(() => {
-        try {
-            const saved = localStorage.getItem('jp_user');
-            return saved ? JSON.parse(saved) : null;
-        } catch (error) {
-            console.warn('User restore error:', error);
-            return null;
-        }
-    });
-
-    // =========================================================
-    // ORDERS / PRODUCTS
-    // =========================================================
-
-    const [orders, setOrders] = useState([]);
-    const [products, setProducts] = useState([]);
-
-    const allProducts = products;
-
-    // =========================================================
-    // CART
-    // =========================================================
-
-    const [cartItems, setCartItems] = useState(() => {
-        try {
-            const saved = localStorage.getItem('jp_cart');
-            return saved ? JSON.parse(saved) : [];
-        } catch (error) {
-            return [];
-        }
-    });
-
-    // =========================================================
-    // WISHLIST
-    // =========================================================
-
-    const [wishlistItems, setWishlistItems] = useState(() => {
-        try {
-            const saved = localStorage.getItem('jp_wishlist');
-            return saved ? JSON.parse(saved) : [];
-        } catch (error) {
-            return [];
-        }
-    });
-
-    // =========================================================
-    // THEME
-    // =========================================================
-
-    const [theme, setTheme] = useState(() => {
-        return localStorage.getItem('jp_theme') || 'dark';
-    });
-
-    // =========================================================
-    // MODALS
-    // =========================================================
-
-    const [selectedProduct, setSelectedProduct] = useState(null);
-    const [viewMode, setViewMode] = useState('grid');
-
-    const [isCartOpen, setIsCartOpen] = useState(false);
-    const [isWishlistOpen, setIsWishlistOpen] = useState(false);
-    const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-    const [isAuthOpen, setIsAuthOpen] = useState(false);
-    const [authInitialTab, setAuthInitialTab] = useState('user');
-
-    const [isUserOrdersOpen, setIsUserOrdersOpen] = useState(false);
-
-    const [checkoutTotals, setCheckoutTotals] = useState(null);
-
-    // =========================================================
-    // TOAST
-    // =========================================================
-
-    const [toastMessage, setToastMessage] = useState('');
-
-    // =========================================================
-    // INVOICE
-    // =========================================================
-
-    const [invoiceOrder, setInvoiceOrder] = useState(null);
-
-    // =========================================================
-    // THEME SYNC
-    // =========================================================
-
-    useEffect(() => {
-        document.documentElement.setAttribute(
-            'data-theme',
-            theme
-        );
-
-        localStorage.setItem(
-            'jp_theme',
-            theme
-        );
-    }, [theme]);
-
-    // =========================================================
-    // CART LOCAL STORAGE
-    // =========================================================
-
-    useEffect(() => {
-        localStorage.setItem(
-            'jp_cart',
-            JSON.stringify(cartItems)
-        );
-    }, [cartItems]);
-
-    // =========================================================
-    // WISHLIST LOCAL STORAGE
-    // =========================================================
-
-    useEffect(() => {
-        localStorage.setItem(
-            'jp_wishlist',
-            JSON.stringify(wishlistItems)
-        );
-    }, [wishlistItems]);
-
-    // =========================================================
-    // USER LOCAL STORAGE
-    // =========================================================
-
-    useEffect(() => {
-        if (currentUser) {
-            localStorage.setItem(
-                'jp_user',
-                JSON.stringify(currentUser)
-            );
-        } else {
-            localStorage.removeItem('jp_user');
-        }
-    }, [currentUser]);
-
-    // =========================================================
-    // LOAD PRODUCTS
-    // =========================================================
-
-    useEffect(() => {
-
-        let cancelled = false;
-
-        const loadProducts = async () => {
-
-            try {
-
-                const data = await api.getProducts();
-
-                if (!cancelled) {
-                    setProducts(
-                        Array.isArray(data)
-                            ? data
-                            : []
-                    );
-                }
-
-            } catch (error) {
-
-                console.warn(
-                    'Products API:',
-                    error.message
-                );
-
-            }
-
-        };
-
-        loadProducts();
-
-        // Keep customer products synced with Admin Panel
-        const productTimer = setInterval(
-            loadProducts,
-            60000
-        );
-
-        return () => {
-
-            cancelled = true;
-
-            clearInterval(
-                productTimer
-            );
-
-        };
-
-    }, []);
-
-    // =========================================================
-    // ⭐ LOAD USER ORDERS
-    // =========================================================
-    //
-    // IMPORTANT:
-    // Backend /api/orders/me already returns ONLY
-    // the logged-in user's orders.
-    //
-    // So we do NOT filter by customer name/phone/email
-    // on frontend.
-    //
-    // =========================================================
-
-    const refreshUserOrders = useCallback(
-        async (showError = false) => {
-
-            if (!currentUser || !getAuthToken()) {
-
-                setOrders([]);
-
-                return [];
-
-            }
-
-            try {
-
-                const latestOrders =
-                    await api.getMyOrders();
-
-                const safeOrders =
-                    Array.isArray(latestOrders)
-                        ? latestOrders
-                        : [];
-
-                setOrders(
-                    previousOrders => {
-
-                        const previousById =
-                            new Map(
-                                previousOrders.map(
-                                    order => [
-                                        String(order.id),
-                                        order
-                                    ]
-                                )
-                            );
-
-                        // -------------------------------------------------
-                        // Detect Approved status change
-                        // -------------------------------------------------
-
-                        const newlyApproved =
-                            safeOrders.find(order => {
-
-                                const oldOrder =
-                                    previousById.get(
-                                        String(order.id)
-                                    );
-
-                                return (
-                                    order.status === 'Approved' &&
-                                    oldOrder &&
-                                    oldOrder.status !== 'Approved'
-                                );
-
-                            });
-
-                        if (newlyApproved) {
-
-                            setInvoiceOrder(
-                                newlyApproved
-                            );
-
-                        }
-
-                        // -------------------------------------------------
-                        // VERY IMPORTANT
-                        //
-                        // Replace old state completely.
-                        //
-                        // Do NOT merge old orders here.
-                        // This guarantees MongoDB's latest status
-                        // is what the customer sees.
-                        // -------------------------------------------------
-
-                        return safeOrders;
-
-                    }
-                );
-
-                return safeOrders;
-
-            } catch (error) {
-
-                if (showError) {
-
-                    showToast(
-                        error.message ||
-                        'Unable to load orders'
-                    );
-
-                }
-
-                console.warn(
-                    'Order refresh failed:',
-                    error.message
-                );
-
-                return [];
-
-            }
-
-        },
-        [currentUser]
-    );
-
-    // =========================================================
-    // ⭐ LIVE TRACKING
-    // =========================================================
-    //
-    // Customer side automatically checks MongoDB
-    // every 5 seconds.
-    //
-    // Pending
-    // Approved
-    // Processing
-    // Shipped
-    // Delivered
-    //
-    // =========================================================
-
-    useEffect(() => {
-
-        if (
-            !currentUser ||
-            !getAuthToken()
-        ) {
-
-            setOrders([]);
-
-            return undefined;
-
-        }
-
-        let cancelled = false;
-
-        const refresh = async () => {
-
-            if (cancelled) {
-                return;
-            }
-
-            await refreshUserOrders(false);
-
-        };
-
-        // First load immediately
-        refresh();
-
-        // Then every 5 seconds
-        const trackingTimer =
-            setInterval(
-                refresh,
-                30000
-            );
-
-        return () => {
-
-            cancelled = true;
-
-            clearInterval(
-                trackingTimer
-            );
-
-        };
-
-    }, [
-        currentUser,
-        refreshUserOrders
-    ]);
-
-    // =========================================================
-    // URL PRODUCT VIEW
-    // =========================================================
-
-    useEffect(() => {
-
-        const params =
-            new URLSearchParams(
-                window.location.search
-            );
-
-        if (
-            params.get('view') ===
-            'product'
-        ) {
-
-            const productId =
-                params.get('id');
-
-            if (productId) {
-
-                const found =
-                    allProducts.find(
-                        product =>
-                            String(product.id) ===
-                            String(productId)
-                    );
-
-                if (found) {
-
-                    setSelectedProduct(
-                        found
-                    );
-
-                }
-
-            } else if (
-                allProducts.length > 0
-            ) {
-
-                setSelectedProduct(
-                    allProducts[0]
-                );
-
-            }
-
-        }
-
-    }, [allProducts]);
-
-    // =========================================================
-    // HELPERS
-    // =========================================================
-
-    const toggleTheme = () => {
-
-        setTheme(
-            previous =>
-                previous === 'dark'
-                    ? 'light'
-                    : 'dark'
-        );
-
-    };
-
-    const showToast = message => {
-        setToastMessage(message);
-    };
-
-    // =========================================================
-    // ⭐ USER LOGIN
-    // =========================================================
-
-    const handleUserLogin = async (
-        userProfile
-    ) => {
-
-        setCurrentUser(
-            userProfile
-        );
-
-        // Clear old user's orders immediately
-        setOrders([]);
-
-        showToast(
-            `Welcome back, ${userProfile.name}! 👋`
-        );
-
-        // Get fresh orders from MongoDB
-        try {
-
-            const latestOrders =
-                await api.getMyOrders();
-
-            setOrders(
-                Array.isArray(
-                    latestOrders
-                )
-                    ? latestOrders
-                    : []
-            );
-
-        } catch (error) {
-
-            console.warn(
-                'Failed to load customer orders:',
-                error.message
-            );
-
-        }
-
-    };
-
-    // =========================================================
-    // ADD TO CART
-    // =========================================================
-
-    const handleAddToCart = product => {
-
-        const size =
-            product.selectedSize ||
-            (
-                product.sizes
-                    ? product.sizes[0]
-                    : 'Standard'
-            );
-
-        const color =
-            product.selectedColor ||
-            (
-                product.colors
-                    ? product.colors[0]?.name
-                    : ''
-            );
-
-        const qty =
-            product.quantity || 1;
-
-        setCartItems(previous => {
-
-            const existingIndex =
-                previous.findIndex(
-                    item =>
-                        item.id ===
-                            product.id &&
-                        item.selectedSize ===
-                            size &&
-                        item.selectedColor ===
-                            color
-                );
-
-            if (
-                existingIndex > -1
-            ) {
-
-                const updated =
-                    [...previous];
-
-                updated[
-                    existingIndex
-                ].quantity =
-                    (
-                        updated[
-                            existingIndex
-                        ].quantity || 1
-                    ) + qty;
-
-                return updated;
-
-            }
-
-            return [
-                ...previous,
-                {
-                    ...product,
-                    selectedSize:
-                        size,
-                    selectedColor:
-                        color,
-                    quantity:
-                        qty
-                }
-            ];
-
-        });
-
-        showToast(
-            `${product.n} added to cart! 🛍️`
-        );
-
-    };
-
-    // =========================================================
-    // UPDATE QUANTITY
-    // =========================================================
-
-    const handleUpdateQuantity = (
-        itemToUpdate,
-        newQty
-    ) => {
-
-        if (newQty <= 0) {
-
-            handleRemoveFromCart(
-                itemToUpdate
-            );
-
-            return;
-
-        }
-
-        setCartItems(
-            previous =>
-                previous.map(
-                    item => {
-
-                        if (
-                            item.id ===
-                                itemToUpdate.id &&
-                            item.selectedSize ===
-                                itemToUpdate.selectedSize &&
-                            item.selectedColor ===
-                                itemToUpdate.selectedColor
-                        ) {
-
-                            return {
-                                ...item,
-                                quantity:
-                                    newQty
-                            };
-
-                        }
-
-                        return item;
-
-                    }
-                )
-        );
-
-    };
-
-    // =========================================================
-    // REMOVE CART
-    // =========================================================
-
-    const handleRemoveFromCart = (
-        itemToRemove
-    ) => {
-
-        setCartItems(
-            previous =>
-                previous.filter(
-                    item =>
-                        !(
-                            item.id ===
-                                itemToRemove.id &&
-                            item.selectedSize ===
-                                itemToRemove.selectedSize &&
-                            item.selectedColor ===
-                                itemToRemove.selectedColor
-                        )
-                )
-        );
-
-        showToast(
-            'Removed from cart'
-        );
-
-    };
-
-    // =========================================================
-    // WISHLIST
-    // =========================================================
-
-    const handleToggleWishlist = (
-        product
-    ) => {
-
-        const isSaved =
-            wishlistItems.some(
-                item =>
-                    item.id ===
-                    product.id
-            );
-
-        if (isSaved) {
-
-            setWishlistItems(
-                previous =>
-                    previous.filter(
-                        item =>
-                            item.id !==
-                            product.id
-                    )
-            );
-
-            showToast(
-                `Removed ${product.n} from wishlist`
-            );
-
-        } else {
-
-            setWishlistItems(
-                previous => [
-                    ...previous,
-                    product
-                ]
-            );
-
-            showToast(
-                `Saved ${product.n} to wishlist! ❤️`
-            );
-
-        }
-
-    };
-
-    // =========================================================
-    // MOVE WISHLIST TO CART
-    // =========================================================
-
-    const handleMoveWishlistToCart = (
-        product
-    ) => {
-
-        handleAddToCart(
-            product
-        );
-
-        setWishlistItems(
-            previous =>
-                previous.filter(
-                    item =>
-                        item.id !==
-                        product.id
-                )
-        );
-
-    };
-
-    // =========================================================
-    // ⭐ PLACE ORDER
-    // =========================================================
-
-    const handleOrderPlaced = async (
-        orderData
-    ) => {
-
-        try {
-
-            const created =
-                await api.createOrder({
-                    customer:
-                        orderData.customer,
-
-                    items:
-                        [...cartItems],
-
-                    totals:
-                        checkoutTotals,
-
-                    paymentMethod:
-                        'UPI (GPay / PhonePe)',
-
-                    paymentVerifiedBySeller:
-                        false
-                });
-
-            // Immediately show newly-created order
-            setOrders(
-                previous => [
-                    created,
-                    ...previous.filter(
-                        order =>
-                            order.id !==
-                            created.id
-                    )
-                ]
-            );
-
-            setCartItems([]);
-
-            showToast(
-                `Payment submitted. Order ${created.id} is waiting for seller verification.`
-            );
-
-            return created;
-
-        } catch (error) {
-
-            showToast(
-                error.message
-            );
-
-            throw error;
-
-        }
-
-    };
-
-    // =========================================================
-    // FILTER PRODUCTS
-    // =========================================================
-
-    const filteredProducts =
-        allProducts.filter(
-            item => {
-
-                const matchesCategory =
-                    activeCategory ===
-                        'All' ||
-                    item.c ===
-                        activeCategory;
-
-                const matchesAge =
-                    activeAge ===
-                        'All Ages' ||
-                    (
-                        item.a &&
-                        item.a.includes(
-                            activeAge.replace(
-                                'Age: ',
-                                ''
-                            )
-                        )
-                    );
-
-                const search =
-                    searchQuery
-                        .toLowerCase()
-                        .trim();
-
-                const matchesSearch =
-                    search === '' ||
-                    (
-                        item.n &&
-                        item.n
-                            .toLowerCase()
-                            .includes(search)
-                    ) ||
-                    (
-                        item.c &&
-                        item.c
-                            .toLowerCase()
-                            .includes(search)
-                    ) ||
-                    (
-                        item.fabric &&
-                        item.fabric
-                            .toLowerCase()
-                            .includes(search)
-                    );
-
-                return (
-                    matchesCategory &&
-                    matchesAge &&
-                    matchesSearch
-                );
-
-            }
-        );
-
-    // =========================================================
-    // SORT
-    // =========================================================
-
-    const sortedProducts =
-        [...filteredProducts].sort(
-            (a, b) => {
-
-                if (
-                    sortOption === 'l'
-                ) {
-
-                    return (
-                        Number(a.p || 0) -
-                        Number(b.p || 0)
-                    );
-
-                }
-
-                if (
-                    sortOption === 'h'
-                ) {
-
-                    return (
-                        Number(b.p || 0) -
-                        Number(a.p || 0)
-                    );
-
-                }
-
-                if (
-                    sortOption === 'r'
-                ) {
-
-                    return (
-                        Number(
-                            b.rating || 0
-                        ) -
-                        Number(
-                            a.rating || 0
-                        )
-                    );
-
-                }
-
-                return 0;
-
-            }
-        );
-
-    // =========================================================
-    // COUNTS
-    // =========================================================
-
-    const cartTotalCount =
-        cartItems.reduce(
-            (
-                total,
-                item
-            ) =>
-                total +
-                (
-                    item.quantity ||
-                    1
-                ),
-            0
-        );
-
-    // =========================================================
-    // OPEN MY ORDERS
-    // =========================================================
-
-    const handleOpenUserOrders =
-        async () => {
-
-            // Open immediately
-            setIsUserOrdersOpen(
-                true
-            );
-
-            // Then force fresh MongoDB fetch
-            if (
-                currentUser &&
-                getAuthToken()
-            ) {
-
-                await refreshUserOrders(
-                    true
-                );
-
-            }
-
-        };
-
-    // =========================================================
-    // RENDER
-    // =========================================================
-
-    return (
-
-        <div
-            style={{
-                minHeight:
-                    '100vh',
-
-                display:
-                    'flex',
-
-                flexDirection:
-                    'column'
-            }}
-        >
-
-            <PromoBanner />
-
-            {/* =====================================================
-                HEADER
-            ===================================================== */}
-
-            <Header
-
-                cartCount={
-                    cartTotalCount
-                }
-
-                wishlistCount={
-                    wishlistItems.length
-                }
-
-                theme={
-                    theme
-                }
-
-                toggleTheme={
-                    toggleTheme
-                }
-
-                onOpenCart={() =>
-                    setIsCartOpen(true)
-                }
-
-                onOpenWishlist={() =>
-                    setIsWishlistOpen(true)
-                }
-
-                activeCategory={
-                    activeCategory
-                }
-
-                setActiveCategory={
-                    setActiveCategory
-                }
-
-                searchQuery={
-                    searchQuery
-                }
-
-                setSearchQuery={
-                    setSearchQuery
-                }
-
-                setViewMode={
-                    setViewMode
-                }
-
-                currentUser={
-                    currentUser
-                }
-
-                onOpenAuth={() => {
-
-                    setAuthInitialTab(
-                        'user'
-                    );
-
-                    setIsAuthOpen(
-                        true
-                    );
-
-                }}
-
-                onOpenUserOrders={
-                    handleOpenUserOrders
-                }
-
-            />
-
-            {/* =====================================================
-                MAIN
-            ===================================================== */}
-
-            <main
-                style={{
-                    maxWidth:
-                        '1140px',
-
-                    width:
-                        '100%',
-
-                    margin:
-                        '0 auto',
-
-                    padding:
-                        '24px 16px 48px',
-
-                    flex:
-                        1
-                }}
-            >
-
-                <Hero
-
-                    activeCategory={
-                        activeCategory
-                    }
-
-                    setActiveCategory={
-                        setActiveCategory
-                    }
-
-                />
-
-                <div
-                    className="top"
-                    style={{
-                        marginTop:
-                            '28px'
-                    }}
-                >
-
-                    <h1
-                        style={{
-                            fontSize:
-                                'clamp(1.8rem, 5vw, 2.6rem)',
-
-                            color:
-                                'var(--ink)',
-
-                            fontFamily:
-                                'Cinzel, serif'
-                        }}
-                    >
-                        Shop All Collections
-                    </h1>
-
-                    <p
-                        style={{
-                            color:
-                                'var(--mute)',
-
-                            margin:
-                                '4px 0 20px',
-
-                            fontSize:
-                                '1.05rem',
-
-                            fontWeight:
-                                600
-                        }}
-                    >
-                        Premium, comfortable
-                        styles for your little
-                        ones —{' '}
-
-                        <em>
-                            Styles that defines
-                            you ..
-                        </em>
-                    </p>
-
-                </div>
-
-                <FilterTools
-
-                    activeCategory={
-                        activeCategory
-                    }
-
-                    setActiveCategory={
-                        setActiveCategory
-                    }
-
-                    activeAge={
-                        activeAge
-                    }
-
-                    setActiveAge={
-                        setActiveAge
-                    }
-
-                    sortOption={
-                        sortOption
-                    }
-
-                    setSortOption={
-                        setSortOption
-                    }
-
-                    totalResults={
-                        sortedProducts.length
-                    }
-
-                />
-
-                {/* =================================================
-                    PRODUCTS
-                ================================================= */}
-
-                <div
-                    className="grid"
-                    id="grid"
-                >
-
-                    {
-                        sortedProducts.length >
-                        0
-                            ? (
-                                sortedProducts.map(
-                                    product => (
-
-                                        <ProductCard
-
-                                            key={
-                                                product.id
-                                            }
-
-                                            product={
-                                                product
-                                            }
-
-                                            onAddToCart={
-                                                handleAddToCart
-                                            }
-
-                                            onQuickView={
-                                                product =>
-                                                    setSelectedProduct(
-                                                        product
-                                                    )
-                                            }
-
-                                            isWishlisted={
-                                                wishlistItems.some(
-                                                    item =>
-                                                        item.id ===
-                                                        product.id
-                                                )
-                                            }
-
-                                            onToggleWishlist={
-                                                handleToggleWishlist
-                                            }
-
-                                        />
-
-                                    )
-                                )
-                            )
-                            : (
-
-                                <p
-                                    className="empty"
-                                    style={{
-                                        gridColumn:
-                                            '1 / -1',
-
-                                        color:
-                                            'var(--mute)',
-
-                                        textAlign:
-                                            'center',
-
-                                        padding:
-                                            '40px 0',
-
-                                        fontSize:
-                                            '1.1rem'
-                                    }}
-                                >
-                                    No products found
-                                    in this category
-                                    or search query.
-                                    Try clearing your
-                                    filters!
-                                </p>
-
-                            )
-                    }
-
-                </div>
-
-            </main>
-
-            <Footer />
-
-            {/* =====================================================
-                PRODUCT MODAL
-            ===================================================== */}
-
-            {
-                selectedProduct && (
-
-                    <ProductDetailModal
-
-                        product={
-                            selectedProduct
-                        }
-
-                        onClose={() =>
-                            setSelectedProduct(
-                                null
-                            )
-                        }
-
-                        onAddToCart={
-                            handleAddToCart
-                        }
-
-                        isWishlisted={
-                            wishlistItems.some(
-                                item =>
-                                    item.id ===
-                                    selectedProduct.id
-                            )
-                        }
-
-                        onToggleWishlist={
-                            handleToggleWishlist
-                        }
-
-                    />
-
-                )
-            }
-
-            {/* =====================================================
-                CART
-            ===================================================== */}
-
-            <CartDrawer
-
-                isOpen={
-                    isCartOpen
-                }
-
-                onClose={() =>
-                    setIsCartOpen(false)
-                }
-
-                cartItems={
-                    cartItems
-                }
-
-                onUpdateQuantity={
-                    handleUpdateQuantity
-                }
-
-                onRemoveItem={
-                    handleRemoveFromCart
-                }
-
-                onProceedCheckout={
-                    totals => {
-
-                        setCheckoutTotals(
-                            totals
-                        );
-
-                        setIsCheckoutOpen(
-                            true
-                        );
-
-                    }
-                }
-
-            />
-
-            {/* =====================================================
-                WISHLIST
-            ===================================================== */}
-
-            <WishlistDrawer
-
-                isOpen={
-                    isWishlistOpen
-                }
-
-                onClose={() =>
-                    setIsWishlistOpen(false)
-                }
-
-                wishlistItems={
-                    wishlistItems
-                }
-
-                onMoveToCart={
-                    handleMoveWishlistToCart
-                }
-
-                onRemoveWishlist={
-                    handleToggleWishlist
-                }
-
-            />
-
-            {/* =====================================================
-                AUTH
-            ===================================================== */}
-
-            <AuthModal
-
-                isOpen={
-                    isAuthOpen
-                }
-
-                onClose={() =>
-                    setIsAuthOpen(false)
-                }
-
-                initialTab={
-                    authInitialTab
-                }
-
-                onUserLogin={
-                    handleUserLogin
-                }
-
-            />
-
-            {/* =====================================================
-                ⭐ USER ORDERS / TRACKING
-            ===================================================== */}
-
-            <UserOrdersModal
-
-                isOpen={
-                    isUserOrdersOpen
-                }
-
-                onClose={() =>
-                    setIsUserOrdersOpen(
-                        false
-                    )
-                }
-
-                currentUser={
-                    currentUser
-                }
-
-                allOrders={
-                    orders
-                }
-
-                onViewInvoice={
-                    order =>
-                        setInvoiceOrder(
-                            order
-                        )
-                }
-
-            />
-
-            {/* =====================================================
-                CHECKOUT
-            ===================================================== */}
-
-            <CheckoutModal
-
-                isOpen={
-                    isCheckoutOpen
-                }
-
-                onClose={() =>
-                    setIsCheckoutOpen(
-                        false
-                    )
-                }
-
-                cartItems={
-                    cartItems
-                }
-
-                totals={
-                    checkoutTotals
-                }
-
-                onClearCart={() =>
-                    setCartItems([])
-                }
-
-                onOrderCreated={
-                    handleOrderPlaced
-                }
-
-            />
-
-            {/* =====================================================
-                INVOICE
-            ===================================================== */}
-
-            {
-                invoiceOrder && (
-
-                    <InvoiceModal
-
-                        order={
-                            invoiceOrder
-                        }
-
-                        onClose={() =>
-                            setInvoiceOrder(
-                                null
-                            )
-                        }
-
-                    />
-
-                )
-            }
-
-            {/* =====================================================
-                TOAST
-            ===================================================== */}
-
-            <Toast
-
-                message={
-                    toastMessage
-                }
-
-                onClose={() =>
-                    setToastMessage('')
-                }
-
-            />
-
-        </div>
-
-    );
-
-}
-
-
-// =============================================================
-// INVOICE MODAL
-// =============================================================
-
-function InvoiceModal({
-    order,
-    onClose
+import React from 'react';
+import { Heart, Star, Eye, ShoppingBag } from 'lucide-react';
+
+const SVG_ICONS = {
+    dress: '<path d="M32 8l-8 4-4 18 6 28h12l6-28-4-18-8-4z M24 12l8 10 8-10"/>',
+    set: '<path d="M20 10l-12 8 6 10 6-4v26h24V24l6 4 6-10-12-8c-2 6-6 8-12 8s-10-2-12-8z"/>',
+    romper: '<path d="M22 8l-10 8 6 8 4-2v14l-4 22h8l4-14 4 14h8l-4-22V22l4 2 6-8-10-8c-2 5-5 7-10 7s-8-2-10-7z"/>',
+    tee: '<path d="M20 10l-14 8 6 12 8-4v30h24V26l8 4 6-12-14-8c-2 6-6 8-12 8s-10-2-12-8z"/>'
+};
+
+export default function ProductCard({
+    product,
+    onAddToCart,
+    onQuickView,
+    isWishlisted,
+    onToggleWishlist
 }) {
-
-    if (!order) {
+    if (!product) {
         return null;
     }
 
-    const invoiceNumber =
-        order.invoiceNumber ||
-        `INV-${String(order.id).replace(
-            /[^a-zA-Z0-9]/g,
-            ''
-        )}`;
+    // =====================================================
+    // PRODUCT PRICE AND DISCOUNT
+    // =====================================================
 
-    const customer =
-        order.customer || {};
+    const price = Number(product.p) || 0;
+    const originalPrice = Number(product.o) || 0;
 
-    const items =
-        order.items || [];
+    const discount =
+        originalPrice > price && originalPrice > 0
+            ? Math.round(
+                  ((originalPrice - price) / originalPrice) * 100
+              )
+            : 0;
 
-    const totals =
-        order.totals || {};
+    // =====================================================
+    // STOCK
+    // =====================================================
 
-    const printInvoice = () => {
-        window.print();
+    const rawStock = product.stock ?? product.quantity;
+
+    const stockValue =
+        rawStock !== undefined &&
+        rawStock !== null &&
+        rawStock !== ''
+            ? Number(rawStock)
+            : null;
+
+    const stockIsValid =
+        stockValue !== null &&
+        Number.isFinite(stockValue) &&
+        stockValue >= 0;
+
+    const hasStock =
+        stockIsValid &&
+        stockValue > 0;
+
+    const stockLabel = !stockIsValid
+        ? 'Stock unavailable'
+        : hasStock
+            ? `${stockValue} in stock`
+            : 'Out of stock';
+
+    // =====================================================
+    // SAFE CALLBACKS
+    // =====================================================
+
+    const handleQuickView = () => {
+        if (typeof onQuickView === 'function') {
+            onQuickView(product);
+        }
     };
 
+    const handleAddToCart = () => {
+        if (!hasStock) {
+            return;
+        }
+
+        if (typeof onAddToCart === 'function') {
+            onAddToCart(product);
+        }
+    };
+
+    const handleWishlist = (event) => {
+        event.stopPropagation();
+
+        if (typeof onToggleWishlist === 'function') {
+            onToggleWishlist(product);
+        }
+    };
+
+    // =====================================================
+    // RENDER
+    // =====================================================
+
     return (
-
-        <div
+        <article
+            className="card"
             style={{
-                position:
-                    'fixed',
+                background: 'var(--card)',
+                border: '1px solid var(--line)',
+                borderRadius: 'var(--radius-md)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                position: 'relative',
+                transition:
+                    'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+                boxShadow: 'var(--shadow-sm)'
+            }}
+            onMouseEnter={(event) => {
+                event.currentTarget.style.transform =
+                    'translateY(-4px)';
 
-                inset:
-                    0,
+                event.currentTarget.style.boxShadow =
+                    'var(--shadow-md)';
 
-                zIndex:
-                    200,
+                event.currentTarget.style.borderColor =
+                    'var(--brand)';
+            }}
+            onMouseLeave={(event) => {
+                event.currentTarget.style.transform =
+                    'translateY(0)';
 
-                background:
-                    'rgba(0,0,0,0.75)',
+                event.currentTarget.style.boxShadow =
+                    'var(--shadow-sm)';
 
-                backdropFilter:
-                    'blur(6px)',
-
-                display:
-                    'flex',
-
-                alignItems:
-                    'center',
-
-                justifyContent:
-                    'center',
-
-                padding:
-                    '16px'
+                event.currentTarget.style.borderColor =
+                    'var(--line)';
             }}
         >
+            {/* =================================================
+                PRODUCT IMAGE
+            ================================================= */}
 
             <div
-                id="invoice-print"
+                className="img"
                 style={{
-                    width:
-                        '100%',
-
-                    maxWidth:
-                        '720px',
-
-                    maxHeight:
-                        '90vh',
-
-                    overflowY:
-                        'auto',
-
-                    background:
-                        '#fff',
-
-                    color:
-                        '#111',
-
-                    borderRadius:
-                        '14px',
-
-                    padding:
-                        '30px',
-
-                    boxShadow:
-                        '0 20px 60px rgba(0,0,0,.3)'
+                    height: '210px',
+                    width: '100%',
+                    display: 'grid',
+                    placeItems: 'center',
+                    position: 'relative',
+                    background: product.bg || '#28050b',
+                    overflow: 'hidden',
+                    cursor: 'pointer'
                 }}
+                onClick={handleQuickView}
             >
+                {/* Product image */}
 
-                {/* =================================================
-                    HEADER
-                ================================================= */}
-
-                <div
-                    style={{
-                        display:
-                            'flex',
-
-                        justifyContent:
-                            'space-between',
-
-                        alignItems:
-                            'flex-start',
-
-                        borderBottom:
-                            '2px solid #111',
-
-                        paddingBottom:
-                            '18px',
-
-                        marginBottom:
-                            '20px'
-                    }}
-                >
-
-                    <div>
-
-                        <h1
-                            style={{
-                                margin:
-                                    0,
-
-                                fontSize:
-                                    '28px',
-
-                                fontWeight:
-                                    900
-                            }}
-                        >
-                            JP CLOTHING
-                        </h1>
-
-                        <p
-                            style={{
-                                margin:
-                                    '5px 0 0',
-
-                                color:
-                                    '#666'
-                            }}
-                        >
-                            JP Clothings
-                        </p>
-
-                    </div>
-
-                    <div
+                {product.image ? (
+                    <img
+                        src={product.image}
+                        alt={product.n || 'Product'}
+                        loading="lazy"
                         style={{
-                            textAlign:
-                                'right'
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.4s ease'
                         }}
-                    >
-
-                        <h2
-                            style={{
-                                margin:
-                                    0
-                            }}
-                        >
-                            INVOICE
-                        </h2>
-
-                        <div
-                            style={{
-                                marginTop:
-                                    '5px',
-
-                                fontWeight:
-                                    700
-                            }}
-                        >
-                            {invoiceNumber}
-                        </div>
-
-                    </div>
-
-                </div>
-
-                {/* =================================================
-                    CUSTOMER
-                ================================================= */}
-
-                <div
-                    style={{
-                        display:
-                            'grid',
-
-                        gridTemplateColumns:
-                            '1fr 1fr',
-
-                        gap:
-                            '20px',
-
-                        marginBottom:
-                            '25px'
-                    }}
-                >
-
-                    <div>
-
-                        <strong>
-                            Bill To
-                        </strong>
-
-                        <p
-                            style={{
-                                margin:
-                                    '6px 0',
-
-                                lineHeight:
-                                    1.6
-                            }}
-                        >
-
-                            {
-                                customer.name ||
-                                'Customer'
-                            }
-
-                            <br />
-
-                            {
-                                customer.phone ||
-                                customer.email ||
-                                ''
-                            }
-
-                            {
-                                customer.address && (
-                                    <>
-                                        <br />
-                                        {
-                                            customer.address
-                                        }
-                                    </>
-                                )
-                            }
-
-                        </p>
-
-                    </div>
-
-                    <div
-                        style={{
-                            textAlign:
-                                'right'
-                        }}
-                    >
-
-                        <strong>
-                            Order Details
-                        </strong>
-
-                        <p
-                            style={{
-                                margin:
-                                    '6px 0',
-
-                                lineHeight:
-                                    1.6
-                            }}
-                        >
-
-                            Order ID:{' '}
-
-                            <strong>
-                                {order.id}
-                            </strong>
-
-                            <br />
-
-                            Date:{' '}
-
-                            {
-                                order.createdAt
-                                    ? new Date(
-                                          order.createdAt
-                                      ).toLocaleDateString(
-                                          'en-IN'
-                                      )
-                                    : new Date().toLocaleDateString(
-                                          'en-IN'
-                                      )
-                            }
-
-                            <br />
-
-                            Status:{' '}
-
-                            <strong>
-                                {
-                                    order.status ||
-                                    'Approved'
-                                }
-                            </strong>
-
-                        </p>
-
-                    </div>
-
-                </div>
-
-                {/* =================================================
-                    ITEMS
-                ================================================= */}
-
-                <table
-                    style={{
-                        width:
-                            '100%',
-
-                        borderCollapse:
-                            'collapse',
-
-                        marginBottom:
-                            '20px'
-                    }}
-                >
-
-                    <thead>
-
-                        <tr>
-
-                            <th
-                                style={{
-                                    textAlign:
-                                        'left',
-
-                                    borderBottom:
-                                        '1px solid #ccc',
-
-                                    padding:
-                                        '10px 5px'
-                                }}
-                            >
-                                Item
-                            </th>
-
-                            <th
-                                style={{
-                                    textAlign:
-                                        'center',
-
-                                    borderBottom:
-                                        '1px solid #ccc',
-
-                                    padding:
-                                        '10px 5px'
-                                }}
-                            >
-                                Qty
-                            </th>
-
-                            <th
-                                style={{
-                                    textAlign:
-                                        'right',
-
-                                    borderBottom:
-                                        '1px solid #ccc',
-
-                                    padding:
-                                        '10px 5px'
-                                }}
-                            >
-                                Price
-                            </th>
-
-                            <th
-                                style={{
-                                    textAlign:
-                                        'right',
-
-                                    borderBottom:
-                                        '1px solid #ccc',
-
-                                    padding:
-                                        '10px 5px'
-                                }}
-                            >
-                                Total
-                            </th>
-
-                        </tr>
-
-                    </thead>
-
-                    <tbody>
-
-                        {
-                            items.map(
-                                (
-                                    item,
-                                    index
-                                ) => {
-
-                                    const qty =
-                                        item.quantity ||
-                                        1;
-
-                                    const price =
-                                        Number(
-                                            item.p
-                                        ) || 0;
-
-                                    return (
-
-                                        <tr
-                                            key={
-                                                index
-                                            }
-                                        >
-
-                                            <td
-                                                style={{
-                                                    padding:
-                                                        '10px 5px',
-
-                                                    borderBottom:
-                                                        '1px solid #eee'
-                                                }}
-                                            >
-
-                                                {item.n}
-
-                                                {
-                                                    item.selectedSize && (
-
-                                                        <small
-                                                            style={{
-                                                                display:
-                                                                    'block',
-
-                                                                color:
-                                                                    '#777'
-                                                            }}
-                                                        >
-                                                            Size:{' '}
-                                                            {
-                                                                item.selectedSize
-                                                            }
-                                                        </small>
-
-                                                    )
-                                                }
-
-                                            </td>
-
-                                            <td
-                                                style={{
-                                                    textAlign:
-                                                        'center',
-
-                                                    padding:
-                                                        '10px 5px',
-
-                                                    borderBottom:
-                                                        '1px solid #eee'
-                                                }}
-                                            >
-                                                {qty}
-                                            </td>
-
-                                            <td
-                                                style={{
-                                                    textAlign:
-                                                        'right',
-
-                                                    padding:
-                                                        '10px 5px',
-
-                                                    borderBottom:
-                                                        '1px solid #eee'
-                                                }}
-                                            >
-                                                ₹
-                                                {price}
-                                            </td>
-
-                                            <td
-                                                style={{
-                                                    textAlign:
-                                                        'right',
-
-                                                    padding:
-                                                        '10px 5px',
-
-                                                    borderBottom:
-                                                        '1px solid #eee',
-
-                                                    fontWeight:
-                                                        700
-                                                }}
-                                            >
-                                                ₹
-                                                {
-                                                    price *
-                                                    qty
-                                                }
-                                            </td>
-
-                                        </tr>
-
+                        onError={(event) => {
+                            event.currentTarget.style.display =
+                                'none';
+
+                            const fallback =
+                                event.currentTarget.parentElement
+                                    ?.querySelector(
+                                        '.product-image-fallback'
                                     );
 
-                                }
-                            )
-                        }
-
-                    </tbody>
-
-                </table>
-
-                {/* =================================================
-                    TOTALS
-                ================================================= */}
-
-                <div
-                    style={{
-                        marginLeft:
-                            'auto',
-
-                        maxWidth:
-                            '320px'
-                    }}
-                >
-
-                    {
-                        totals.subtotal != null && (
-
-                            <div
-                                style={{
-                                    display:
-                                        'flex',
-
-                                    justifyContent:
-                                        'space-between',
-
-                                    padding:
-                                        '5px 0'
-                                }}
-                            >
-
-                                <span>
-                                    Subtotal
-                                </span>
-
-                                <strong>
-                                    ₹
-                                    {
-                                        totals.subtotal
-                                    }
-                                </strong>
-
-                            </div>
-
-                        )
-                    }
-
-                    {
-                        totals.discount != null && (
-
-                            <div
-                                style={{
-                                    display:
-                                        'flex',
-
-                                    justifyContent:
-                                        'space-between',
-
-                                    padding:
-                                        '5px 0'
-                                }}
-                            >
-
-                                <span>
-                                    Discount
-                                </span>
-
-                                <strong>
-                                    -₹
-                                    {
-                                        totals.discount
-                                    }
-                                </strong>
-
-                            </div>
-
-                        )
-                    }
-
-                    {
-                        totals.shipping != null && (
-
-                            <div
-                                style={{
-                                    display:
-                                        'flex',
-
-                                    justifyContent:
-                                        'space-between',
-
-                                    padding:
-                                        '5px 0'
-                                }}
-                            >
-
-                                <span>
-                                    Shipping
-                                </span>
-
-                                <strong>
-                                    ₹
-                                    {
-                                        totals.shipping
-                                    }
-                                </strong>
-
-                            </div>
-
-                        )
-                    }
-
-                    <div
-                        style={{
-                            display:
-                                'flex',
-
-                            justifyContent:
-                                'space-between',
-
-                            padding:
-                                '12px 0',
-
-                            marginTop:
-                                '8px',
-
-                            borderTop:
-                                '2px solid #111',
-
-                            fontSize:
-                                '1.15rem'
-                        }}
-                    >
-
-                        <strong>
-                            Grand Total
-                        </strong>
-
-                        <strong>
-
-                            ₹
-                            {
-                                totals.grandTotal ??
-                                items.reduce(
-                                    (
-                                        sum,
-                                        item
-                                    ) =>
-                                        sum +
-                                        (
-                                            Number(
-                                                item.p
-                                            ) || 0
-                                        ) *
-                                        (
-                                            item.quantity ||
-                                            1
-                                        ),
-                                    0
-                                )
+                            if (fallback) {
+                                fallback.style.display = 'block';
                             }
+                        }}
+                    />
+                ) : null}
 
-                        </strong>
-
-                    </div>
-
-                </div>
-
-                {/* =================================================
-                    PAYMENT
-                ================================================= */}
+                {/* Fallback SVG */}
 
                 <div
+                    className="product-image-fallback"
                     style={{
-                        marginTop:
-                            '20px',
-
-                        padding:
-                            '12px',
-
-                        background:
-                            '#f5f5f5',
-
-                        borderRadius:
-                            '8px'
+                        display: product.image ? 'none' : 'block',
+                        width: '50%',
+                        height: '50%'
                     }}
                 >
-
-                    Payment Method:{' '}
-
-                    <strong>
-                        {
-                            order.paymentMethod ||
-                            'WhatsApp / COD'
-                        }
-                    </strong>
-
-                </div>
-
-                {/* =================================================
-                    FOOTER
-                ================================================= */}
-
-                <div
-                    style={{
-                        textAlign:
-                            'center',
-
-                        marginTop:
-                            '25px',
-
-                        color:
-                            '#666',
-
-                        fontSize:
-                            '0.85rem'
-                    }}
-                >
-                    Thank you for shopping
-                    with JP Clothing ❤️
-                </div>
-
-                {/* =================================================
-                    BUTTONS
-                ================================================= */}
-
-                <div
-                    className="invoice-actions"
-                    style={{
-                        display:
-                            'flex',
-
-                        gap:
-                            '10px',
-
-                        justifyContent:
-                            'center',
-
-                        marginTop:
-                            '25px'
-                    }}
-                >
-
-                    <button
-                        onClick={
-                            printInvoice
-                        }
+                    <svg
+                        viewBox="0 0 64 64"
+                        fill={product.fg || 'var(--brand)'}
+                        aria-hidden="true"
                         style={{
-                            border:
-                                'none',
+                            width: '100%',
+                            height: '100%'
+                        }}
+                        dangerouslySetInnerHTML={{
+                            __html:
+                                SVG_ICONS[product.k] ||
+                                SVG_ICONS.dress
+                        }}
+                    />
+                </div>
 
+                {/* =================================================
+                    PRODUCT TAG
+                ================================================= */}
+
+                {product.t && (
+                    <span
+                        className="tag"
+                        style={{
+                            position: 'absolute',
+                            top: '10px',
+                            left: '10px',
                             background:
-                                '#111',
-
+                                product.t === 'Sale'
+                                    ? 'var(--accent)'
+                                    : 'var(--tag)',
                             color:
-                                '#fff',
-
-                            padding:
-                                '11px 22px',
-
-                            borderRadius:
-                                '8px',
-
-                            cursor:
-                                'pointer',
-
-                            fontWeight:
-                                700
+                                product.t === 'Sale'
+                                    ? '#fff'
+                                    : 'var(--tag-ink)',
+                            fontWeight: 800,
+                            fontSize: '0.72rem',
+                            padding: '3px 9px',
+                            borderRadius: '999px',
+                            boxShadow:
+                                '0 2px 6px rgba(0,0,0,0.2)'
                         }}
                     >
-                        🖨️ Print Invoice
-                    </button>
+                        {product.t}
+                    </span>
+                )}
 
-                    <button
-                        onClick={
-                            onClose
-                        }
+                {/* =================================================
+                    STOCK BADGE
+                ================================================= */}
+
+                <span
+                    className="product-stock-badge"
+                    style={{
+                        position: 'absolute',
+                        bottom: '8px',
+                        right: '8px',
+                        background: 'rgba(24,2,5,.92)',
+                        color: !stockIsValid
+                            ? '#fcd34d'
+                            : hasStock
+                                ? '#86efac'
+                                : '#fca5a5',
+                        padding: '5px 9px',
+                        borderRadius: '7px',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        zIndex: 2
+                    }}
+                >
+                    {stockLabel}
+                </span>
+
+                {/* =================================================
+                    DISCOUNT BADGE
+                ================================================= */}
+
+                {discount > 0 && (
+                    <span
                         style={{
-                            border:
-                                '1px solid #ccc',
-
-                            background:
-                                '#fff',
-
-                            color:
-                                '#111',
-
-                            padding:
-                                '11px 22px',
-
-                            borderRadius:
-                                '8px',
-
-                            cursor:
-                                'pointer',
-
-                            fontWeight:
-                                700
+                            position: 'absolute',
+                            bottom: '8px',
+                            left: '8px',
+                            background: 'rgba(24, 2, 5, 0.85)',
+                            color: 'var(--brand)',
+                            border: '1px solid var(--brand)',
+                            fontWeight: 800,
+                            fontSize: '0.7rem',
+                            padding: '3px 7px',
+                            borderRadius: '6px',
+                            backdropFilter: 'blur(4px)',
+                            zIndex: 2
                         }}
                     >
-                        Close
-                    </button>
+                        {discount}% OFF
+                    </span>
+                )}
 
+                {/* =================================================
+                    WISHLIST BUTTON
+                ================================================= */}
+
+                <button
+                    type="button"
+                    onClick={handleWishlist}
+                    aria-label={
+                        isWishlisted
+                            ? 'Remove from wishlist'
+                            : 'Add to wishlist'
+                    }
+                    aria-pressed={Boolean(isWishlisted)}
+                    style={{
+                        position: 'absolute',
+                        top: '10px',
+                        right: '10px',
+                        background: 'var(--card)',
+                        border: '1px solid var(--line)',
+                        borderRadius: '50%',
+                        width: '34px',
+                        height: '34px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                        zIndex: 3
+                    }}
+                >
+                    <Heart
+                        size={16}
+                        color={
+                            isWishlisted
+                                ? 'var(--brand)'
+                                : 'var(--mute)'
+                        }
+                        fill={
+                            isWishlisted
+                                ? 'var(--brand)'
+                                : 'none'
+                        }
+                    />
+                </button>
+
+                {/* =================================================
+                    QUICK VIEW OVERLAY
+                ================================================= */}
+
+                <div
+                    className="quick-overlay"
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        background: 'rgba(0,0,0,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: 0,
+                        transition: 'opacity 0.2s ease',
+                        pointerEvents: 'none'
+                    }}
+                >
+                    <span
+                        style={{
+                            background: 'var(--brand)',
+                            color: 'var(--brand-ink)',
+                            padding: '7px 14px',
+                            borderRadius: '999px',
+                            fontSize: '0.8rem',
+                            fontWeight: 800,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: 'var(--gold-glow)'
+                        }}
+                    >
+                        <Eye size={14} />
+                        Quick View
+                    </span>
                 </div>
-
             </div>
 
-        </div>
+            {/* =================================================
+                PRODUCT INFORMATION
+            ================================================= */}
 
+            <div
+                className="info"
+                style={{
+                    padding: '12px 14px 14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '5px',
+                    flex: 1
+                }}
+            >
+                {/* Product name and rating */}
+
+                <div
+                    style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        gap: '8px'
+                    }}
+                >
+                    <h3
+                        onClick={handleQuickView}
+                        style={{
+                            fontSize: '0.98rem',
+                            color: 'var(--ink)',
+                            fontFamily: 'Cinzel, sans-serif',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            lineHeight: 1.35,
+                            margin: 0,
+                            overflowWrap: 'anywhere'
+                        }}
+                    >
+                        {product.n || 'Unnamed Product'}
+                    </h3>
+
+                    {product.rating != null &&
+                        Number(product.rating) > 0 && (
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    fontSize: '0.76rem',
+                                    fontWeight: 800,
+                                    color: 'var(--brand)',
+                                    flexShrink: 0
+                                }}
+                            >
+                                <Star
+                                    size={12}
+                                    fill="var(--brand)"
+                                    color="var(--brand)"
+                                />
+
+                                <span>{product.rating}</span>
+                            </div>
+                        )}
+                </div>
+
+                {/* Age/category description */}
+
+                {product.a && (
+                    <span
+                        className="age"
+                        style={{
+                            color: 'var(--mute)',
+                            fontSize: '0.82rem',
+                            fontWeight: 600
+                        }}
+                    >
+                        {product.a}
+                    </span>
+                )}
+
+                {/* =================================================
+                    PRICE
+                ================================================= */}
+
+                <div
+                    className="price"
+                    style={{
+                        fontWeight: 800,
+                        fontSize: '1.05rem',
+                        margin: '5px 0 8px',
+                        color: 'var(--brand)'
+                    }}
+                >
+                    ₹{price.toLocaleString('en-IN')}
+
+                    {originalPrice > price && (
+                        <s
+                            style={{
+                                color: 'var(--mute)',
+                                fontWeight: 400,
+                                fontSize: '0.85rem',
+                                marginLeft: '7px',
+                                textDecoration: 'line-through'
+                            }}
+                        >
+                            ₹
+                            {originalPrice.toLocaleString('en-IN')}
+                        </s>
+                    )}
+                </div>
+
+                {/* =================================================
+                    ADD TO CART
+                ================================================= */}
+
+                <button
+                    type="button"
+                    className="add btn-primary"
+                    data-i={product.id}
+                    disabled={!hasStock}
+                    onClick={handleAddToCart}
+                    title={
+                        !stockIsValid
+                            ? 'Stock information is unavailable'
+                            : !hasStock
+                                ? 'This product is out of stock'
+                                : 'Add this product to your cart'
+                    }
+                    style={{
+                        marginTop: 'auto',
+                        width: '100%',
+                        padding: '9px 12px',
+                        fontSize: '0.85rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '7px',
+                        opacity: hasStock ? 1 : 0.55,
+                        cursor: hasStock
+                            ? 'pointer'
+                            : 'not-allowed'
+                    }}
+                >
+                    <ShoppingBag size={15} />
+
+                    {!stockIsValid
+                        ? 'Stock Unavailable'
+                        : hasStock
+                            ? 'Add to Cart'
+                            : 'Out of Stock'}
+                </button>
+            </div>
+
+            {/* =================================================
+                COMPONENT STYLES
+            ================================================= */}
+
+            <style>
+                {`
+                    .img:hover .quick-overlay {
+                        opacity: 1 !important;
+                    }
+
+                    .product-stock-badge {
+                        max-width: calc(100% - 16px);
+                        text-align: center;
+                    }
+
+                    .card button:disabled {
+                        pointer-events: none;
+                    }
+                `}
+            </style>
+        </article>
     );
-
 }
