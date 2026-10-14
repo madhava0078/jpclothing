@@ -207,7 +207,7 @@ export default function App() {
         // Keep customer products synced with Admin Panel
         const productTimer = setInterval(
             loadProducts,
-            10000
+            30000
         );
 
         return () => {
