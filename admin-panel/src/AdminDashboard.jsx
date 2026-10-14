@@ -1624,6 +1624,35 @@ export default function AdminDashboard({
                                     onChange={handleImageUpload}
                                     style={{ display: 'none' }}
                                 />
+
+                                <div style={{ marginTop: '14px' }}>
+                                    <label style={labelStyle}>
+                                        Or paste image URL
+                                    </label>
+                                    <input
+                                        type="url"
+                                        inputMode="url"
+                                        value={newProduct.image.startsWith('data:') ? '' : newProduct.image}
+                                        onChange={e => {
+                                            const image = e.target.value.trim();
+                                            setNewProduct(prev => ({ ...prev, image }));
+                                            setImagePreview(image);
+                                        }}
+                                        placeholder="https://example.com/product-image.jpg"
+                                        style={{
+                                            ...inputStyle,
+                                            width: '100%',
+                                            boxSizing: 'border-box'
+                                        }}
+                                    />
+                                    <small style={{
+                                        display: 'block',
+                                        color: 'var(--mute)',
+                                        marginTop: '6px'
+                                    }}>
+                                        Paste a direct, publicly accessible image URL.
+                                    </small>
+                                </div>
                             </div>
 
                             {/* NAME */}
@@ -1915,45 +1944,4 @@ export default function AdminDashboard({
             </div>
         </div>
     );
-    <div style={{ marginTop: '14px' }}>
-  <label style={labelStyle}>
-    Or paste image URL
-  </label>
-
-  <input
-    type="url"
-    inputMode="url"
-    value={
-      newProduct.image.startsWith('data:')
-        ? ''
-        : newProduct.image
-    }
-    onChange={(e) => {
-      const image = e.target.value.trim();
-
-      setNewProduct((prev) => ({
-        ...prev,
-        image: image
-      }));
-
-      setImagePreview(image);
-    }}
-    placeholder="https://example.com/product-image.jpg"
-    style={{
-      ...inputStyle,
-      width: '100%',
-      boxSizing: 'border-box'
-    }}
-  />
-
-  <small
-    style={{
-      display: 'block',
-      color: 'var(--mute)',
-      marginTop: '6px'
-    }}
-  >
-    Paste a direct, publicly accessible image URL.
-  </small>
-</div>
 }
